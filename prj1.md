@@ -15,11 +15,11 @@ flowchart LR
         UC1a(Duyệt sản phẩm theo danh mục)
         UC2(Xây dựng PC & Kiểm tra tương thích)
         UC3(Quản lý PC Profile & Nhận đề xuất nâng cấp)
-        UC5(Quản lý Giỏ hàng & Đặt hàng)
-        UC6(Quản lý Thông tin Sản phẩm)
-        UC7(Quản lý Tập Luật Tương thích)
-        UC8(Quản lý Đơn hàng & Người dùng)
-        UC9(Xem Dashboard & Thống kê)
+        UC4(Quản lý Giỏ hàng & Đặt hàng)
+        UC5(Quản lý Thông tin Sản phẩm)
+        UC6(Quản lý Tập Luật Tương thích)
+        UC7(Quản lý Đơn hàng & Người dùng)
+        UC8(Xem Dashboard & Thống kê)
     end
     
     User --> UC0
@@ -27,15 +27,15 @@ flowchart LR
     User --> UC1a
     User --> UC2
     User --> UC3
-    User --> UC5
+    User --> UC4
     
     Admin --> UC0
+    Admin --> UC5
     Admin --> UC6
     Admin --> UC7
     Admin --> UC8
-    Admin --> UC9
     
-    UC5 -.->|"<<include>>"| UC2
+    UC4 -.->|"<<include>>"| UC2
     UC3 -.->|"<<extend>>"| UC2
 ```
 
@@ -48,6 +48,332 @@ flowchart LR
     *   **Tích hợp AI suy luận (LLM - ví dụ: Gemini) vào Tìm kiếm:** Vượt ra ngoài việc tìm kiếm từ khóa hay chatbot thông thường, AI được sử dụng như một "chuyên gia phần cứng" có khả năng suy luận. AI giúp phân tích ngữ nghĩa truy vấn phức tạp của người dùng để tìm kiếm, tự động trích xuất thông số và đánh giá mức độ phù hợp của các linh kiện dựa trên nhu cầu cụ thể (ví dụ: render 3D vs. chơi game).
 *   **Bối cảnh:** Nhu cầu tự tùy biến và nâng cấp thiết bị công nghệ ngày càng cao. Người dùng cần một hệ thống không chỉ để "mua" mà còn để "được tư vấn" như một chuyên gia phần cứng thực thụ.
 *   **Tài liệu tham khảo:** Chuẩn tài liệu đặc tả yêu cầu phần mềm IEEE 830, tài liệu API tích hợp LLM (Gemini API / OpenAI API), tài liệu Elasticsearch.
+
+### 1.1. Đặc tả Use-Case chi tiết
+
+Dưới đây là đặc tả chi tiết cho các luồng nghiệp vụ (Use-case) cốt lõi của hệ thống, giúp làm rõ các kịch bản tương tác giữa người dùng, hệ thống AI, Rule Engine và Admin.
+
+#### UC0: Đăng ký & Đăng nhập
+
+**Mô tả:** Người dùng hoặc Quản trị viên đăng nhập vào hệ thống bằng tài khoản (Email/Mật khẩu) hoặc thông qua mạng xã hội (Google/Facebook).
+**Actor chính:** Người dùng (User), Quản trị viên (Admin).
+**Actor phụ:** OAuth Providers (Google, Facebook).
+**Tiền điều kiện:** Người dùng chưa đăng nhập.
+
+**Sơ đồ hoạt động (Activity Diagram):**
+```mermaid
+flowchart TD
+    Start(["Truy cập trang Đăng nhập"]) --> B{"Chọn phương thức?"}
+    B -- "Email/Password" --> C["Nhập Email & Mật khẩu"]
+    C --> D["Bấm 'Đăng nhập'"]
+    D --> E{"Kiểm tra thông tin"}
+    E -- "Sai thông tin" --> F["Báo lỗi tài khoản hoặc mật khẩu"]
+    F --> C
+    E -- "Đúng" --> G{"Tài khoản bị khóa?"}
+    G -- "Có" --> H["Thông báo liên hệ Admin"]
+    H --> End_Err(["Kết thúc"])
+    G -- "Không" --> I["Tạo JWT Token/Session"]
+    I --> J{"Kiểm tra Role"}
+    J -- "Admin" --> K["Chuyển hướng đến Admin Dashboard"]
+    J -- "User" --> L["Chuyển hướng về trang trước đó (hoặc Trang chủ)"]
+    
+    B -- "Social Login" --> M["Chuyển hướng sang Google/Facebook"]
+    M --> N{"Xác thực Social"}
+    N -- "Thất bại" --> O["Thông báo lỗi xác thực"]
+    O --> B
+    N -- "Thành công" --> P{"Email đã tồn tại?"}
+    P -- "Có" --> I
+    P -- "Chưa" --> Q["Tự động tạo tài khoản mới"]
+    Q --> I
+```
+
+**Luồng sự kiện chính (Happy Path - Email/Password):**
+1. Người dùng truy cập trang Đăng nhập.
+2. Nhập thông tin `Email` và `Mật khẩu`.
+3. Nhấn nút "Đăng nhập".
+4. Hệ thống kiểm tra trùng khớp trong Database.
+5. Kiểm tra trạng thái tài khoản (`is_active = true`).
+6. Hệ thống tạo JWT Token (hoặc Session) lưu vào Cookie/Local Storage.
+7. Điều hướng người dùng về trang họ đang truy cập trước đó (Ví dụ: đang ở Giỏ hàng -> Trở lại Giỏ hàng). Đối với Admin, điều hướng vào Admin Dashboard.
+
+**Luồng sự kiện chính (Happy Path - Social Login):**
+1. Người dùng nhấn nút "Đăng nhập bằng Google".
+2. Hệ thống chuyển hướng sang cửa sổ xác thực của Google.
+3. Người dùng cho phép quyền truy cập.
+4. Google trả về Auth Code, hệ thống gọi lên Google API lấy thông tin Profile (Email, Name).
+5. Nếu Email chưa có trong hệ thống, tự động tạo tài khoản mới. Nếu có rồi, tiến hành cấp JWT Token và đăng nhập thành công.
+
+**Luồng ngoại lệ (Exception/Alternative Paths):**
+*   *0a. Sai mật khẩu quá số lần quy định:* Nếu đăng nhập sai mật khẩu 5 lần liên tiếp, hệ thống khóa tài khoản tạm thời trong 15 phút và gửi email cảnh báo.
+*   *0b. Tài khoản bị khóa (Banned):* Ở bước 5 (kiểm tra trạng thái), nếu `is_active = false`, hệ thống chặn đăng nhập và hiện thông báo: "Tài khoản của bạn đã bị khóa do vi phạm chính sách."
+
+#### UC1: Tìm kiếm ngữ nghĩa & Chat với AI
+
+**Mô tả:** Người dùng nhập yêu cầu bằng ngôn ngữ tự nhiên (không cần chính xác từ khóa kỹ thuật) để tìm kiếm linh kiện phù hợp với nhu cầu. AI sẽ đóng vai trò như một chuyên gia tư vấn.
+**Actor chính:** Người dùng (User).
+**Actor phụ:** AI Engine (Gemini), Vector DB.
+**Tiền điều kiện:** Người dùng đang ở trang chủ hoặc thanh tìm kiếm. Hệ thống AI đang hoạt động.
+
+**Sơ đồ hoạt động (Activity Diagram):**
+```mermaid
+flowchart TD
+    Start(["Người dùng nhập truy vấn"]) --> B("Hệ thống gửi tới AI Engine")
+    B --> C{"AI Engine hoạt động?"}
+    C -- "Lỗi/Timeout" --> D["Chuyển sang tìm kiếm từ khóa thông thường"]
+    D --> End_KW(["Hiển thị kết quả từ khóa"])
+    C -- "OK" --> E{"Phân tích ý định (Intent Parsing)"}
+    E -- "Sai miền" --> F["Phản hồi: Xin lỗi, chỉ tư vấn công nghệ"]
+    F --> End_Err(["Kết thúc"])
+    E -- "Hợp lệ" --> G["Truy vấn Vector DB & DB"]
+    G --> H{"Tìm thấy SP?"}
+    H -- "Không" --> I["Gợi ý SP gần nhất + Lời khuyên AI"]
+    H -- "Có" --> J["Trả về Top SP + Lời giải thích AI"]
+    I --> End_OK(["Hiển thị kết quả"])
+    J --> End_OK
+```
+
+**Luồng sự kiện chính (Happy Path):**
+1. Người dùng nhập câu truy vấn (Ví dụ: "Card màn hình nào dưới 8 triệu chơi mượt game AAA?").
+2. Người dùng nhấn "Tìm kiếm" hoặc Enter.
+3. Hệ thống gửi truy vấn đến AI Engine để phân tích ý định (Intent Parsing).
+4. AI Engine bóc tách được: `Category = VGA`, `Budget <= 8000000`, `Purpose = Gaming AAA`.
+5. Hệ thống truy vấn Vector DB và Database để tìm top 5 sản phẩm phù hợp nhất.
+6. AI Engine nhận danh sách sản phẩm, tạo câu trả lời giải thích lý do đề xuất dựa trên nhu cầu của User.
+7. Hệ thống hiển thị kết quả tìm kiếm gồm: Câu tư vấn của AI và Danh sách thẻ sản phẩm.
+
+**Luồng ngoại lệ (Exception/Alternative Paths):**
+*   *1a. AI Service không phản hồi (Timeout) hoặc báo lỗi:* Hệ thống tự động chuyển sang luồng tìm kiếm từ khóa thông thường (Fuzzy Search bằng Elasticsearch), bỏ qua phần tư vấn AI. Hiển thị thông báo: "AI tạm thời không khả dụng, hiển thị kết quả tìm kiếm theo từ khóa".
+*   *1b. Truy vấn không liên quan (Ví dụ: "Thời tiết hôm nay thế nào?"):* AI nhận diện ý định sai miền. Hệ thống phản hồi: "Xin lỗi, tôi chỉ có thể tư vấn về linh kiện máy tính và thiết bị công nghệ."
+*   *1c. Không tìm thấy sản phẩm thỏa mãn điều kiện:* Hệ thống hiển thị câu tư vấn của AI (ví dụ: "Hiện không có card nào dưới 8 triệu đáp ứng chơi mượt mọi game AAA Ultra setting") và gợi ý các sản phẩm gần mức giá nhất hoặc có hiệu năng tốt nhất trong tầm giá.
+
+#### UC2: Xây dựng PC & Kiểm tra tương thích (PC Builder)
+
+**Mô tả:** Người dùng chọn từng linh kiện để lắp ráp thành một bộ PC hoàn chỉnh. Hệ thống sẽ tự động kiểm tra và cảnh báo nếu các linh kiện xung đột hoặc không tối ưu.
+**Actor chính:** Người dùng (User).
+**Actor phụ:** Hardware Rule Engine.
+**Tiền điều kiện:** Người dùng truy cập công cụ PC Builder.
+
+**Sơ đồ hoạt động (Activity Diagram):**
+```mermaid
+flowchart TD
+    Start(["Chọn 'Thêm linh kiện'"]) --> B["Gửi cấu hình hiện tại + SP vừa chọn tới Rule Engine"]
+    B --> C{"Kiểm tra tương thích"}
+    C -- "Xung đột nghiêm trọng (ERROR)" --> D["Hiển thị cảnh báo đỏ. Chặn thêm vào giỏ"]
+    D --> E["Gợi ý linh kiện thay thế"]
+    E --> Start
+    C -- "Cảnh báo (WARNING/INFO)" --> F["Hiển thị cảnh báo vàng"]
+    F --> G["Cập nhật cấu hình"]
+    C -- "Tương thích hoàn toàn" --> G
+    G --> H{"Hoàn thành cấu hình?"}
+    H -- "Chưa" --> Start
+    H -- "Rồi" --> I["Bấm 'Thêm vào giỏ hàng'"]
+    I --> J{"Có cảnh báo WARNING?"}
+    J -- "Có" --> K["Yêu cầu xác nhận rủi ro"]
+    K -- "Đồng ý" --> L(["Thêm vào giỏ hàng"])
+    K -- "Hủy" --> Start
+    J -- "Không" --> L
+```
+
+**Luồng sự kiện chính (Happy Path):**
+1. Người dùng chọn mục "Thêm CPU" và chọn 1 CPU (VD: Intel Core i5 13600K).
+2. Hệ thống gửi cấu hình hiện tại đến Rule Engine.
+3. Rule Engine đánh giá không có xung đột, hệ thống cập nhật cấu hình và hiển thị CPU đã chọn.
+4. Người dùng tiếp tục chọn "Thêm Mainboard" và chọn 1 Mainboard socket LGA 1700.
+5. Hệ thống gửi danh sách (CPU, Mainboard) đến Rule Engine.
+6. Rule Engine kiểm tra tương thích (Socket match) thành công.
+7. Hệ thống hiển thị trạng thái "Tương thích" (Màu xanh).
+8. Người dùng lặp lại đến khi hoàn thành cấu hình và bấm "Thêm toàn bộ vào giỏ hàng".
+
+**Luồng ngoại lệ (Exception/Alternative Paths):**
+*   *2a. Xung đột nghiêm trọng (ERROR):* Ở bước 4, nếu User chọn Mainboard socket AM5. Rule Engine trả về vi phạm mức ERROR. Hệ thống hiển thị cảnh báo đỏ ngay lập tức: "Mainboard không hỗ trợ CPU này (LGA1700 vs AM5)". Giao diện KHÔNG cho phép "Thêm toàn bộ vào giỏ hàng" cho đến khi lỗi được khắc phục. Hệ thống gợi ý danh sách Mainboard tương thích.
+*   *2b. Cảnh báo không tối ưu (WARNING/INFO):* User chọn Nguồn (PSU) 450W cho cấu hình có RTX 4070. Rule Engine trả về WARNING. Hệ thống hiển thị cảnh báo vàng: "Công suất nguồn có thể không đủ tải (Khuyến nghị >= 650W)". User VẪN CÓ THỂ tiếp tục mua hàng nếu phớt lờ cảnh báo, hệ thống yêu cầu xác nhận rủi ro.
+
+#### UC3: Quản lý PC Profile & Nhận đề xuất nâng cấp
+
+**Mô tả:** Người dùng lưu lại cấu hình PC hiện tại của mình. Hệ thống sử dụng AI và Rule Engine để phân tích điểm nghẽn (bottleneck) của cấu hình và đưa ra lộ trình nâng cấp phù hợp với ngân sách.
+**Actor chính:** Người dùng (User).
+**Actor phụ:** AI Engine, Rule Engine.
+**Tiền điều kiện:** Người dùng đã đăng nhập và truy cập trang PC Profile.
+
+**Sơ đồ hoạt động (Activity Diagram):**
+```mermaid
+flowchart TD
+    Start(["Truy cập PC Profile"]) --> B{"Đã có Profile chưa?"}
+    B -- "Chưa" --> C["Tạo Profile mới (Nhập/Chọn linh kiện hiện tại)"]
+    C --> D["Lưu Profile"]
+    B -- "Có rồi" --> E["Xem chi tiết Profile"]
+    D --> E
+    E --> F["Bấm 'Nhận đề xuất nâng cấp'"]
+    F --> G["Hệ thống gửi cấu hình cho AI & Rule Engine"]
+    G --> H{"Phân tích Bottleneck"}
+    H -- "Cấu hình cân bằng" --> I["Thông báo: PC đang tối ưu, chưa cần nâng cấp"]
+    H -- "Có điểm nghẽn" --> J["AI phân tích mục đích sử dụng (Gaming/Work)"]
+    J --> K["Tìm linh kiện thay thế phù hợp & Check tương thích"]
+    K --> L["Hiển thị Option nâng cấp (Kèm giải thích)"]
+    L --> M{"Người dùng chọn Option?"}
+    M -- "Không" --> N(["Lưu lại xem sau"])
+    M -- "Có" --> O["Thêm linh kiện mới vào Giỏ hàng"]
+    I --> End(["Kết thúc"])
+    N --> End
+    O --> End
+```
+
+**Luồng sự kiện chính (Happy Path):**
+1. Người dùng vào trang "PC Profile" và xem cấu hình hiện tại của mình (ví dụ: đang dùng Core i3 gen 10, GTX 1050).
+2. Người dùng nhấn nút "Tư vấn nâng cấp".
+3. Hệ thống hiển thị popup hỏi: "Ngân sách của bạn?" và "Mục tiêu nâng cấp (Ví dụ: Chơi mượt game XYZ)?".
+4. Người dùng nhập thông tin và xác nhận.
+5. AI Engine phân tích cấu hình hiện tại, nhận diện "VGA GTX 1050 là điểm nghẽn lớn nhất cho gaming".
+6. AI tìm kiếm VGA mới phù hợp ngân sách, gửi qua Rule Engine kiểm tra xem nguồn (PSU) và Mainboard hiện tại có gánh được VGA mới không.
+7. Hệ thống trả về đề xuất: "Nâng cấp lên RTX 3060 (Lý do...) + Đổi Nguồn lên 600W (Vì nguồn cũ không đủ)".
+8. Người dùng đồng ý và nhấn "Thêm các món nâng cấp vào Giỏ hàng".
+
+**Luồng ngoại lệ (Exception/Alternative Paths):**
+*   *3a. Ngân sách quá thấp:* Ở bước 5, AI không tìm được linh kiện nào tạo ra sự nâng cấp rõ rệt với ngân sách cung cấp. Hệ thống phản hồi: "Ngân sách hiện tại khó tạo ra thay đổi lớn. Bạn nên tích lũy thêm khoảng X triệu hoặc tìm mua đồ cũ."
+*   *3b. Cấu hình quá cũ không thể nâng cấp lẻ:* Ở bước 6, Rule Engine phát hiện Mainboard quá cũ không hỗ trợ linh kiện đời mới. AI đề xuất: "Cấu hình đã hết vòng đời nâng cấp. Bạn nên build một dàn PC mới hoàn toàn thay vì nâng cấp từng món."
+
+#### UC4: Quản lý Giỏ hàng & Đặt hàng (Checkout)
+
+**Mô tả:** Người dùng xem lại các sản phẩm đã chọn, nhập thông tin giao hàng, thanh toán và hoàn tất đơn hàng.
+**Actor chính:** Người dùng (User).
+**Tiền điều kiện:** Người dùng đã có sản phẩm trong giỏ hàng và đã đăng nhập (Nếu chưa đăng nhập sẽ được yêu cầu).
+
+**Sơ đồ hoạt động (Activity Diagram):**
+```mermaid
+flowchart TD
+    Start(["Truy cập Giỏ hàng"]) --> B["Bấm 'Tiến hành thanh toán'"]
+    B --> C{"Đã đăng nhập?"}
+    C -- "Chưa" --> D["Yêu cầu Đăng nhập"]
+    D --> B
+    C -- "Rồi" --> E["Nhập địa chỉ & Phương thức thanh toán"]
+    E --> F["Hệ thống kiểm tra tương thích ngầm"]
+    F --> G{"Phát hiện xung đột?"}
+    G -- "Có" --> H["Cảnh báo: Linh kiện xung đột. Xác nhận mua lẻ?"]
+    H -- "Không" --> I(["Quay lại Giỏ hàng"])
+    H -- "Có" --> J["Kiểm tra tồn kho"]
+    G -- "Không" --> J
+    J --> K{"Đủ hàng?"}
+    K -- "Không" --> L["Báo lỗi SP hết hàng"]
+    L --> I
+    K -- "Có" --> M["Trừ tồn kho & Tạo Đơn hàng PENDING"]
+    M --> End(["Thông báo Đặt hàng thành công"])
+```
+
+**Luồng sự kiện chính (Happy Path):**
+1. Người dùng truy cập Giỏ hàng, kiểm tra lại danh sách linh kiện và tổng tiền.
+2. Người dùng nhấn "Tiến hành Thanh toán".
+3. *(Include UC0)* Nếu chưa đăng nhập, hệ thống điều hướng sang trang Đăng nhập. Sau khi đăng nhập thành công, quay lại trang Thanh toán.
+4. Người dùng điền/chọn địa chỉ giao hàng và phương thức thanh toán (COD / Chuyển khoản).
+5. Hệ thống tự động gọi hàm `CheckCompatibility()` lần cuối ngầm bên dưới (để đảm bảo không có linh kiện xung đột nào bị sót).
+6. Kết quả trả về an toàn, Người dùng nhấn "Xác nhận đặt hàng".
+7. Hệ thống trừ tồn kho (Stock quantity), tạo bản ghi Order mới với trạng thái PENDING.
+8. Hệ thống hiển thị trang "Đặt hàng thành công" và gửi email xác nhận.
+
+**Luồng ngoại lệ (Exception/Alternative Paths):**
+*   *4a. Hết hàng (Out of stock) tại thời điểm checkout:* Ở bước 6, khi kiểm tra tồn kho, một sản phẩm trong giỏ đã hết. Hệ thống báo lỗi, bôi đỏ sản phẩm hết hàng và yêu cầu người dùng loại bỏ khỏi giỏ trước khi thanh toán.
+*   *4b. Phát hiện xung đột (ERROR) ở bước check cuối:* Ở bước 5, nếu trong giỏ có chứa các linh kiện xung đột (do người dùng thêm lẻ từ trang chi tiết sản phẩm, không qua PC Builder). Hệ thống hiện Pop-up cảnh báo chặn (Blocker): "Phát hiện linh kiện không tương thích trong giỏ hàng. Bạn có chắc chắn muốn mua lẻ không?". Nếu User xác nhận "Mua lẻ", hệ thống cho phép qua bước 6.
+
+#### UC5: Quản lý Thông tin Sản phẩm (Admin)
+
+**Mô tả:** Admin thêm mới hoặc cập nhật thông tin linh kiện. Điểm đặc biệt của hệ thống là khi lưu sản phẩm, hệ thống sẽ tự động cập nhật thông số kỹ thuật (JSON) phục vụ Rule Engine và tạo Vector Embedding phục vụ AI Search.
+**Actor chính:** Quản trị viên (Admin).
+**Actor phụ:** AI Engine (Vector DB).
+**Tiền điều kiện:** Admin đã đăng nhập vào trang Quản trị.
+
+**Sơ đồ hoạt động (Activity Diagram):**
+```mermaid
+flowchart TD
+    Start(["Admin chọn 'Thêm/Sửa Sản phẩm'"]) --> B["Nhập thông tin cơ bản (Tên, Giá, Ảnh)"]
+    B --> C["Nhập thông số kỹ thuật (JSON Specs)"]
+    C --> D["Bấm 'Lưu sản phẩm'"]
+    D --> E["Hệ thống lưu vào DB quan hệ"]
+    E --> F["Gửi Message (RabbitMQ) đến AI Engine"]
+    F --> G["AI Engine tạo Vector Embedding"]
+    G --> H["Lưu Vector vào Vector DB"]
+    H --> End(["Hoàn tất. Sẵn sàng cho AI Search & Rule Engine"])
+```
+
+**Luồng sự kiện chính (Happy Path):**
+1. Admin truy cập trang Quản lý Sản phẩm và chọn "Thêm mới".
+2. Admin nhập các thông tin cơ bản: Tên, Hãng, Danh mục, Giá, Số lượng.
+3. Admin nhập các trường thông số kỹ thuật động (Ví dụ: `socket_type: LGA1700`, `form_factor: ATX`).
+4. Admin nhấn "Lưu". Hệ thống lưu dữ liệu vào bảng `Product`.
+5. Hệ thống kích hoạt một sự kiện ngầm (Async task qua RabbitMQ) gửi data sản phẩm sang AI Service.
+6. AI Service sinh vector ngữ nghĩa (Embedding) và lưu vào Vector DB.
+7. Hệ thống hiển thị thông báo "Thêm sản phẩm thành công".
+
+**Luồng ngoại lệ (Exception/Alternative Paths):**
+*   *5a. Lỗi đồng bộ Vector DB:* Ở bước 6, AI Service bị lỗi không thể tạo vector. Hệ thống lưu log lỗi và đánh dấu sản phẩm `sync_status = FAILED`. Sản phẩm vẫn xuất hiện trên web nhưng sẽ không được tìm thấy qua AI Semantic Search cho đến khi Admin bấm "Đồng bộ lại" bằng tay.
+
+#### UC6: Quản lý Tập Luật Tương thích (Admin)
+
+**Mô tả:** Admin định nghĩa các quy tắc để hệ thống PC Builder biết linh kiện nào lắp được với nhau (Ví dụ: CPU Intel đời 13 phải đi với Mainboard LGA1700).
+**Actor chính:** Quản trị viên (Admin).
+**Actor phụ:** Rule Engine.
+**Tiền điều kiện:** Admin đã đăng nhập vào trang Quản trị.
+
+**Sơ đồ hoạt động (Activity Diagram):**
+```mermaid
+flowchart TD
+    Start(["Truy cập Quản lý Luật"]) --> B["Chọn 'Thêm Luật mới'"]
+    B --> C["Chọn Loại linh kiện Nguồn & Đích (VD: CPU -> Mainboard)"]
+    C --> D["Chọn thuộc tính đối chiếu (VD: socket_type)"]
+    D --> E["Chọn phép toán & Mức độ (VD: IN, ERROR)"]
+    E --> F["Viết thông báo lỗi mẫu (Template)"]
+    F --> G["Bấm 'Lưu Luật'"]
+    G --> H{"Hệ thống validate logic"}
+    H -- "Hợp lệ" --> I["Lưu vào bảng Compat_Rule"]
+    I --> J["Xóa Cache của Rule Engine"]
+    H -- "Không hợp lệ" --> K["Báo lỗi, yêu cầu sửa"]
+    K --> E
+    J --> End(["Luật mới có hiệu lực ngay lập tức"])
+```
+
+**Luồng sự kiện chính (Happy Path):**
+1. Admin vào module "Luật Tương Thích".
+2. Admin thiết lập luật mới: `Source=CPU`, `Target=Motherboard`.
+3. Admin định nghĩa logic: Thuộc tính `socket_type` của CPU phải `IN` (nằm trong) mảng `supported_sockets` của Motherboard. Nếu vi phạm, báo mức `ERROR`.
+4. Admin điền câu thông báo mẫu: "CPU {source_value} không lắp vừa mainboard này".
+5. Admin nhấn Lưu.
+6. Hệ thống kiểm tra tính hợp lệ của cấu trúc luật, lưu vào DB và tự động clear Cache của Go Rule Engine.
+7. Các User đang dùng PC Builder ngay lập tức bị áp dụng luật mới này.
+
+#### UC7: Quản lý Đơn hàng & Người dùng (Admin)
+
+**Mô tả:** Admin theo dõi và cập nhật trạng thái các đơn hàng (Từ lúc chờ xác nhận đến khi giao thành công). Đồng thời, Admin có thể quản lý trạng thái của người dùng.
+**Actor chính:** Quản trị viên (Admin).
+**Tiền điều kiện:** Admin đã đăng nhập vào trang Quản trị.
+
+**Sơ đồ hoạt động (Activity Diagram - Xử lý Đơn hàng):**
+```mermaid
+flowchart TD
+    Start(["Truy cập Quản lý Đơn hàng"]) --> B["Xem danh sách Đơn hàng"]
+    B --> C["Chọn một đơn hàng PENDING (Chờ xác nhận)"]
+    C --> D{"Kiểm tra thanh toán & tồn kho"}
+    D -- "Hợp lệ" --> E["Chuyển trạng thái sang CONFIRMED"]
+    D -- "Gian lận/Hết hàng" --> F["Chuyển trạng thái CANCELLED"]
+    F --> F1["Hoàn tiền (Nếu đã thanh toán)"]
+    F1 --> End_Cancel(["Gửi Email Hủy đơn"])
+    E --> G["Giao cho đơn vị vận chuyển"]
+    G --> H["Chuyển trạng thái SHIPPING"]
+    H --> I{"Khách nhận được hàng?"}
+    I -- "Nhận thành công" --> J["Chuyển trạng thái DELIVERED"]
+    I -- "Boom hàng/Hoàn trả" --> K["Chuyển trạng thái CANCELLED & Nhập lại kho"]
+    J --> End_Done(["Giao dịch hoàn tất"])
+    K --> End_Cancel
+```
+
+**Luồng sự kiện chính (Happy Path - Quản lý Đơn hàng):**
+1. Admin truy cập module "Quản lý Đơn hàng".
+2. Hệ thống hiển thị danh sách đơn hàng mới (Trạng thái `PENDING`).
+3. Admin xem chi tiết đơn hàng, xác nhận thông tin thanh toán.
+4. Admin nhấn "Xác nhận đơn". Trạng thái chuyển thành `CONFIRMED`. Hệ thống gửi email thông báo cho User.
+5. Khi hàng được giao cho shipper, Admin cập nhật thành `SHIPPING`.
+6. Khi có đối soát giao hàng thành công, Admin cập nhật thành `DELIVERED`.
+
+**Luồng ngoại lệ (Exception/Alternative Paths):**
+*   *7a. Hủy đơn hàng:* Nếu phát hiện gian lận hoặc hết hàng thực tế, Admin chuyển trạng thái sang `CANCELLED`. Hệ thống tự động hoàn lại số lượng tồn kho vào bảng `Product` và gửi email xin lỗi khách hàng.
+*   *7b. Khóa tài khoản User:* Trong module "Quản lý Người dùng", nếu Admin phát hiện User có dấu hiệu boom hàng nhiều lần, Admin có thể đổi trạng thái User `is_active = false`. User này sẽ bị chặn đăng nhập (tham chiếu UC0).
 
 ## 2. Thiết kế kiến trúc phần mềm (High-Level Design)
 
@@ -405,6 +731,114 @@ sequenceDiagram
 }
 ```
 
+---
+
+**Sơ đồ tuần tự: Luồng Đặt hàng & Thanh toán (Checkout Flow)**
+
+```mermaid
+sequenceDiagram
+    actor User as Người dùng
+    participant UI as Client (ReactJS)
+    participant GW as API Gateway (Node.js)
+    participant Core as Core Backend (Java)
+    participant RuleEng as Rule Engine (Go)
+    participant DB as Relational DB
+
+    User->>UI: Bấm "Tiến hành thanh toán" & Xác nhận
+    UI->>GW: POST /api/v1/orders/checkout
+    GW->>Core: Forward request (Kèm JWT & Cart_ID)
+    Core->>DB: Lấy danh sách sản phẩm trong giỏ hàng
+    DB-->>Core: Danh sách Product IDs & Quantities
+    
+    %% Gọi Rule Engine để check lần cuối
+    Core->>RuleEng: gRPC: CheckCompatibility(ProductIDs)
+    RuleEng->>DB: Lấy specs & đánh giá luật
+    DB-->>RuleEng: Kết quả đánh giá
+    RuleEng-->>Core: Response (is_compatible, errors)
+    
+    alt Có lỗi xung đột (ERROR)
+        Core-->>GW: 400 Bad Request (Kèm chi tiết lỗi tương thích)
+        GW-->>UI: Forward response
+        UI-->>User: Cảnh báo chặn thanh toán, yêu cầu sửa giỏ hàng
+    else Tương thích hoàn toàn / User đã xác nhận rủi ro
+        Core->>DB: Bắt đầu Transaction
+        Core->>DB: Kiểm tra tồn kho (Stock_quantity)
+        alt Hết hàng
+            DB-->>Core: Lỗi tồn kho không đủ
+            Core->>DB: Rollback Transaction
+            Core-->>GW: 400 Bad Request (Lỗi hết hàng)
+            GW-->>UI: Forward response
+            UI-->>User: Cảnh báo sản phẩm hết hàng
+        else Đủ hàng
+            Core->>DB: Trừ tồn kho (Stock_quantity -= qty)
+            Core->>DB: Insert bảng ORDER (PENDING)
+            Core->>DB: Insert bảng ORDER_DETAIL
+            Core->>DB: Clear Cart
+            Core->>DB: Commit Transaction
+            Core-->>GW: 200 OK (Kèm Order_ID)
+            GW-->>UI: Forward response
+            UI-->>User: Chuyển hướng sang trang Xác nhận đơn hàng thành công
+        end
+    end
+```
+
+**Luồng xử lý (Data Flow): Luồng Đặt hàng & Thanh toán (Checkout Flow)**
+1. **Input:** Người dùng xác nhận thanh toán giỏ hàng (chứa danh sách các sản phẩm và thông tin giao hàng).
+2. **Compatibility Check (Ngầm):** Core Backend (Java) trước khi tạo đơn sẽ tổng hợp danh sách ID linh kiện và gọi gRPC sang Hardware Rule Engine (Go) để kiểm tra lại toàn bộ giỏ hàng, đề phòng trường hợp người dùng thêm lẻ các linh kiện xung đột vào giỏ (VD: mua CPU AMD và Mainboard Intel).
+3. **Database Transaction:** Nếu tương thích (hoặc người dùng đã chủ động xác nhận mua rời), Java Core mở một ACID transaction. Tiến hành kiểm tra và trừ tồn kho các sản phẩm, tạo record vào bảng `ORDER` và `ORDER_DETAIL`, đồng thời xóa dữ liệu trong giỏ hàng.
+4. **Rollback & Error Handling:** Nếu bất kỳ bước nào thất bại (Go phát hiện xung đột, hoặc DB báo hết hàng), toàn bộ quá trình sẽ được Rollback, DB không thay đổi, và thông báo lỗi tương ứng được trả về để Frontend hiển thị cho người dùng xử lý.
+
+---
+
+**Sơ đồ tuần tự: Luồng Phân tích PC Profile & Đề xuất Nâng cấp**
+
+```mermaid
+sequenceDiagram
+    actor User as Người dùng
+    participant UI as Client (ReactJS)
+    participant GW as API Gateway (Node.js)
+    participant Core as Core Backend (Java)
+    participant AI as AI Engine (Python FastAPI)
+    participant LLM as Gemini API
+    participant VDB as Vector DB
+    participant RuleEng as Rule Engine (Go)
+    
+    User->>UI: Bấm "Tư vấn nâng cấp" (Kèm ngân sách & mục tiêu)
+    UI->>GW: POST /api/v1/profile/{id}/upgrade-suggestions
+    GW->>Core: Forward request
+    Core->>Core: Fetch thông tin PC Profile hiện tại từ DB
+    Core->>AI: REST POST /internal/ai/upgrade (Profile_Specs + Ngân sách)
+    
+    %% AI Phân tích Bottleneck & Tìm kiếm thay thế
+    AI->>LLM: Gửi cấu hình cũ + Yêu cầu phân tích bottleneck
+    LLM-->>AI: Nhận diện điểm nghẽn (VD: GPU yếu) & Gợi ý hướng nâng cấp
+    AI->>VDB: Semantic Search tìm GPU phù hợp ngân sách
+    VDB-->>AI: Top 3 GPU tiềm năng
+    
+    %% AI nhờ Rule Engine validate các ứng viên
+    loop Từng GPU tiềm năng
+        AI->>RuleEng: CheckCompatibility(Cấu hình_Cũ - GPU_Cũ + GPU_Mới)
+        RuleEng-->>AI: Trả kết quả (VD: GPU_1 bị lỗi do PSU quá yếu, GPU_2 OK)
+    end
+    
+    %% AI tổng hợp
+    AI->>AI: Chọn GPU_2 (Tương thích tốt nhất & hợp budget)
+    AI->>LLM: Tạo văn bản giải thích lý do đề xuất GPU_2
+    LLM-->>AI: Đoạn text giải thích
+    
+    AI-->>Core: Response (Đề xuất thay GPU_2 + Lời giải thích)
+    Core-->>GW: Forward response
+    GW-->>UI: Forward response
+    UI-->>User: Hiển thị giao diện Đề xuất nâng cấp
+```
+
+**Luồng xử lý (Data Flow): Luồng Phân tích PC Profile & Đề xuất Nâng cấp**
+1. **Input:** Người dùng yêu cầu tư vấn nâng cấp dựa trên PC Profile có sẵn, kèm theo mức ngân sách và nhu cầu (VD: "Có 5 triệu, muốn chơi game mượt hơn").
+2. **AI Bottleneck Analysis:** AI Engine (Python) gửi thông số chi tiết dàn PC cũ và mục tiêu của người dùng cho Gemini LLM để đánh giá tìm ra "điểm nghẽn" (bottleneck) cản trở hiệu năng (VD: CPU quá yếu so với GPU hiện tại).
+3. **AI Search:** Khi biết cần thay linh kiện gì (VD: cần thay CPU), AI dùng Vector DB tìm các CPU thỏa mãn mức ngân sách.
+4. **Rule Engine Validation (Bước chốt chặn):** AI Engine không tự tiện trả kết quả ngay. Nó thay thử từng linh kiện ứng viên vào cấu hình cũ và gọi Rule Engine (Go) để kiểm tra. Ví dụ: Nếu CPU mới khác socket so với Mainboard cũ, Rule Engine sẽ báo ERROR. Khi đó AI sẽ biết phải gợi ý thay cả Mainboard, hoặc tìm CPU khác cùng socket.
+5. **Output:** Sau khi tìm được phương án tối ưu (Hiệu năng tốt + Đúng ngân sách + Rule Engine báo tương thích an toàn), AI sẽ sinh văn bản giải thích lý luận của mình và trả về Frontend để người dùng tham khảo và bấm "Thêm vào giỏ".
+
 ## 5. Thiết kế giao diện người dùng (UI/UX)
 
 ### 5.1. Sơ đồ di chuyển màn hình (Screen Navigation Flow)
@@ -719,6 +1153,7 @@ flowchart TD
 │  [Thêm tất cả vào giỏ hàng 🛒]    [Lưu cấu hình 💾]          │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
+```
 
 #### Màn hình 5: Giỏ hàng & Thanh toán (Cart & Checkout)
 
