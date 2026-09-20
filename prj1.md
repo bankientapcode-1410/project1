@@ -15,7 +15,6 @@ flowchart LR
         UC1a(Duyệt sản phẩm theo danh mục)
         UC2(Xây dựng PC & Kiểm tra tương thích)
         UC3(Quản lý PC Profile & Nhận đề xuất nâng cấp)
-        UC4(Yêu cầu AI So sánh sản phẩm)
         UC5(Quản lý Giỏ hàng & Đặt hàng)
         UC6(Quản lý Thông tin Sản phẩm)
         UC7(Quản lý Tập Luật Tương thích)
@@ -28,7 +27,6 @@ flowchart LR
     User --> UC1a
     User --> UC2
     User --> UC3
-    User --> UC4
     User --> UC5
     
     Admin --> UC0
@@ -47,7 +45,7 @@ flowchart LR
     *   Hệ thống quản lý bán hàng cơ bản (Quản lý người dùng, Sản phẩm, Giỏ hàng, Thanh toán, Đơn hàng).
     *   **Công cụ kiểm tra tính tương thích (Compatibility Checker):** Tự động phát hiện xung đột phần cứng.
     *   **Hồ sơ cấu hình (PC Profile) & Đề xuất nâng cấp:** Lưu trữ cấu hình hiện tại của người dùng, phân tích điểm nghẽn (bottleneck) và gợi ý lộ trình nâng cấp.
-    *   **Tích hợp AI suy luận (LLM - ví dụ: Gemini) vào Tìm kiếm & So sánh:** Vượt ra ngoài việc tìm kiếm từ khóa hay chatbot thông thường, AI được sử dụng như một "chuyên gia phần cứng" có khả năng suy luận. AI giúp phân tích ngữ nghĩa truy vấn phức tạp của người dùng để tìm kiếm, tự động trích xuất thông số, đánh giá và so sánh ưu/nhược điểm của các linh kiện dựa trên nhu cầu cụ thể (ví dụ: render 3D vs. chơi game).
+    *   **Tích hợp AI suy luận (LLM - ví dụ: Gemini) vào Tìm kiếm:** Vượt ra ngoài việc tìm kiếm từ khóa hay chatbot thông thường, AI được sử dụng như một "chuyên gia phần cứng" có khả năng suy luận. AI giúp phân tích ngữ nghĩa truy vấn phức tạp của người dùng để tìm kiếm, tự động trích xuất thông số và đánh giá mức độ phù hợp của các linh kiện dựa trên nhu cầu cụ thể (ví dụ: render 3D vs. chơi game).
 *   **Bối cảnh:** Nhu cầu tự tùy biến và nâng cấp thiết bị công nghệ ngày càng cao. Người dùng cần một hệ thống không chỉ để "mua" mà còn để "được tư vấn" như một chuyên gia phần cứng thực thụ.
 *   **Tài liệu tham khảo:** Chuẩn tài liệu đặc tả yêu cầu phần mềm IEEE 830, tài liệu API tích hợp LLM (Gemini API / OpenAI API), tài liệu Elasticsearch.
 
@@ -66,24 +64,33 @@ flowchart TD
         direction TB
         User_Service["User & Auth"]
         Order_Cart["Order & Cart"]
-        Rule_Engine["Hardware Rule Engine"]
         PC_Profile_Manager["PC Profile Manager"]
+    end
+    
+    subgraph Rule_Engine_Service ["Hardware Rule Engine Subsystem (Go)"]
+        direction TB
+        Rule_Evaluator["Rule Evaluator"]
+        Aggregate_Calculator["Aggregate Calculator"]
+        Rule_Cache["Rule Cache (In-Memory)"]
     end
     
     subgraph AI_Engine ["AI & NLP Engine (Python FastAPI)"]
         direction TB
         Semantic_Search["Semantic Search"]
-        AI_Compare["AI Reasoning & Compare"]
+        AI_Reasoning["AI Reasoning"]
         AI_Chatbot["Interactive AI Chatbot"]
     end
     
     API_Gateway -->|"REST API (E-commerce)"| Core_Backend
+    API_Gateway -->|"REST API (Compatibility)"| Rule_Engine_Service
     API_Gateway -->|"REST API (AI/Search)"| AI_Engine
+    Core_Backend <-->|"gRPC (Internal)"| Rule_Engine_Service
     Core_Backend <-->|"REST API (Internal)"| AI_Engine
     Core_Backend <-->|"Async Tasks\n(Embedding Generation)"| MQ["Message Queue\n(RabbitMQ)"]
     AI_Engine <--> MQ
     
     Core_Backend <--> RDBMS[("Relational DB\n(MySQL/PostgreSQL)")]
+    Rule_Engine_Service <-->|"Read-Only"| RDBMS
     AI_Engine --> VectorDB[("Vector DB\n(Elasticsearch/Milvus)")]
     AI_Engine <-->|"API"| LLM["LLM API\n(Gemini)"]
     Core_Backend --> ObjectStorage[("Object Storage\n(S3/MinIO)\nẢnh sản phẩm")]
@@ -93,17 +100,17 @@ flowchart TD
 Dự án sử dụng mô hình **Client-Server** kết hợp với kiến trúc **Microservices** (dựa trên **Service-Oriented Architecture - SOA**). 
 *   **Client (Frontend):** Ứng dụng Web (ReactJS)[cite: 1].
 *   **API Gateway:** Điều hướng request và luân chuyển dữ liệu qua RESTful API (Node.js).
-*   **Core Backend:** Hệ thống nghiệp vụ E-commerce cốt lõi (Java - Spring Boot). Xử lý dữ liệu cấu trúc chặt chẽ.
-*   **AI Reasoning & NLP Engine (Microservices):** Trái tim thông minh của hệ thống (Python - FastAPI), giao tiếp trực tiếp với Vector Database và các mô hình ngôn ngữ lớn (LLM như Gemini) để thực hiện các tác vụ suy luận, so sánh và tìm kiếm ngữ nghĩa[cite: 1]. Giao tiếp với Core Backend qua RESTful API.
+*   **Core Backend:** Hệ thống nghiệp vụ E-commerce cốt lõi (Java - Spring Boot). Xử lý quản lý người dùng, đơn hàng, giỏ hàng, hồ sơ PC Profile. Giao tiếp với Rule Engine qua gRPC.
+*   **Hardware Rule Engine (Microservice - Go):** Service chuyên biệt viết bằng Go (Golang), chịu trách nhiệm đánh giá tính tương thích phần cứng với hiệu năng cao. Go được chọn vì tốc độ xử lý rule nhanh (compiled native, zero overhead), goroutines cho phép đánh giá nhiều rule song song, và tiêu tốn rất ít RAM (~10-30MB). Nhận request trực tiếp từ API Gateway qua REST API, hoặc từ Core Backend qua gRPC khi cần kiểm tra tương thích trong luồng đặt hàng.
+*   **AI Reasoning & NLP Engine (Microservices):** Trái tim thông minh của hệ thống (Python - FastAPI), giao tiếp trực tiếp với Vector Database và các mô hình ngôn ngữ lớn (LLM như Gemini) để thực hiện các tác vụ suy luận và tìm kiếm ngữ nghĩa[cite: 1]. Giao tiếp với Core Backend qua RESTful API.
 
 **Phân rã hệ thống (Modules):**
-1.  **User & E-commerce Core Subsystem:** Quản lý tài khoản, danh mục, giỏ hàng, đơn hàng[cite: 1].
-2.  **Hardware Profile & Rule Engine Subsystem:** Xử lý hồ sơ máy tính và kiểm tra tính tương thích dựa trên các luật cứng (Rule-based)[cite: 1].
-3.  **Semantic Search Subsystem:** Khác với tìm kiếm truyền thống, module này kết hợp Elasticsearch (Fuzzy Search) và vector hóa dữ liệu (Vector Database) để tìm kiếm dựa trên "ý nghĩa" câu chữ[cite: 1].
-4.  **AI Reasoning & Comparison Subsystem:** Nhận đầu vào là các sản phẩm hoặc yêu cầu mơ hồ, sử dụng LLM để[cite: 1]:
+1.  **User & E-commerce Core Subsystem (Java Spring Boot):** Quản lý tài khoản, danh mục, giỏ hàng, đơn hàng, hồ sơ PC Profile[cite: 1].
+2.  **Hardware Rule Engine Subsystem (Go):** Microservice độc lập viết bằng Go, chuyên đánh giá tính tương thích phần cứng. Nhận danh sách linh kiện, tải luật từ DB, tính toán aggregate values, đánh giá song song các rule bằng goroutines và trả về kết quả vi phạm. Giao tiếp với Core Backend qua gRPC[cite: 1].
+3.  **Semantic Search Subsystem (Python FastAPI):** Khác với tìm kiếm truyền thống, module này kết hợp Elasticsearch (Fuzzy Search) và vector hóa dữ liệu (Vector Database) để tìm kiếm dựa trên "ý nghĩa" câu chữ[cite: 1].
+4.  **AI Reasoning Subsystem (Python FastAPI):** Nhận đầu vào là các yêu cầu mơ hồ, sử dụng LLM để[cite: 1]:
     *   Suy luận ra nhu cầu cấu hình thực tế (VD: "Máy làm đồ họa kiến trúc" -> Cần ưu tiên CPU đa nhân, RAM lớn, Card Nvidia)[cite: 1].
-    *   So sánh 2 sản phẩm và tạo ra bảng tóm tắt ưu/nhược điểm theo ngữ cảnh của người dùng[cite: 1].
-5.  **Interactive AI Chatbot:** Giao diện giao tiếp bằng ngôn ngữ tự nhiên, đóng vai trò luân chuyển dữ liệu từ người dùng đến các module AI phía trên và trả kết quả dưới dạng hội thoại[cite: 1].
+5.  **Interactive AI Chatbot (Python FastAPI):** Giao diện giao tiếp bằng ngôn ngữ tự nhiên, đóng vai trò luân chuyển dữ liệu từ người dùng đến các module AI phía trên và trả kết quả dưới dạng hội thoại[cite: 1].
 
 ## 3. Thiết kế dữ liệu (Database Design)
 
@@ -289,10 +296,10 @@ sequenceDiagram
     Core->>DB: Lấy chi tiết sản phẩm
     DB-->>Core: Product details (specs, price, name...)
     Core-->>AI: Trả về chi tiết 3 sản phẩm
-    AI->>LLM: Request Reasoning & Compare (3 SP, User Context)
+    AI->>LLM: Request Reasoning (3 SP, User Context)
     
     alt LLM phản hồi thành công
-        LLM-->>AI: Phân tích so sánh & Lời khuyên
+        LLM-->>AI: Phân tích sự phù hợp & Lời khuyên
         AI-->>GW: Response: D/s SP + Giải thích của AI
         GW-->>UI: Forward response
         UI-->>User: Hiển thị giao diện kết quả
@@ -311,27 +318,8 @@ sequenceDiagram
 1.  **Input:** Người dùng nhập: *"Cần mua card màn hình dưới 8 triệu chạy mượt Cyberpunk 2077 và thỉnh thoảng edit video"*[cite: 1].
 2.  **Intent Parsing (LLM):** Hệ thống gửi chuỗi này đến LLM (Gemini)[cite: 1]. AI suy luận và trích xuất ra các điều kiện: `{ "budget": <= 8000000, "category": "VGA", "keywords": ["gaming high-end", "video editing"], "brand_preference": "Nvidia (tốt cho edit video)" }`[cite: 1].
 3.  **Database Query:** Hệ thống dùng JSON trên để query vào database hoặc Vector DB, lấy ra top 3 sản phẩm phù hợp nhất (VD: RTX 4060, RX 7600)[cite: 1].
-4.  **AI Reasoning & Generation:** Gửi danh sách 3 sản phẩm này ngược lại cho LLM yêu cầu so sánh dựa trên ngữ cảnh người dùng[cite: 1].
-5.  **Output:** Trả về kết quả hiển thị cho Frontend gồm: Danh sách sản phẩm + Đoạn giải thích suy luận của AI (VD: *"RTX 4060 được đề xuất vì hỗ trợ CUDA tốt cho việc edit video của bạn, dù RX 7600 có hiệu năng thuần chơi game tương đương..."*)[cite: 1].
-
-**Đặc tả RESTful API cho module so sánh (Module Specification):**
-*   **Endpoint:** `POST /api/v1/ai/compare` (Thuộc Python Microservice)
-*   **Tên hàm nội bộ:** `generateAIComparison()`[cite: 1]
-*   **Yêu cầu tích hợp:** Core Backend (Java) sẽ đóng gói payload dưới dạng Data Transfer Object (DTO) gửi sang service này.
-*   **Đầu vào (Request Body JSON):** 
-    `{ "product_A_id": "id_A", "product_B_id": "id_B", "user_context": "Dùng để lập trình AI" }`
-*   **Xử lý:** Nhận request, fetch chi tiết `Product_Specs` của A và B[cite: 1]. Construct một prompt gửi đến LLM (Gemini API) với nội dung: *"Hãy đóng vai chuyên gia phần cứng. So sánh sản phẩm A [Specs A] và B [Specs B]. Dựa trên nhu cầu [user_context], hãy phân tích ưu/nhược và đưa ra lời khuyên"*[cite: 1].
-*   **Kết quả trả về (Response JSON):** 
-```json
-{
-  "comparison_summary": "Sản phẩm A có lợi thế về VRAM lớn, rất phù hợp cho lập trình AI so với B...",
-  "winner_id": "id_A",
-  "key_differences": [
-    {"feature": "VRAM", "A": "16GB", "B": "8GB"},
-    {"feature": "Core Clock", "A": "2.2 GHz", "B": "2.5 GHz"}
-  ]
-}
-```
+4.  **AI Reasoning & Generation:** Gửi danh sách 3 sản phẩm này ngược lại cho LLM yêu cầu giải thích sự phù hợp dựa trên ngữ cảnh người dùng[cite: 1].
+5.  **Output:** Trả về kết quả hiển thị cho Frontend gồm: Danh sách sản phẩm + Đoạn giải thích suy luận của AI (VD: *"RTX 4060 được đề xuất vì hỗ trợ CUDA tốt cho việc edit video của bạn..."*)[cite: 1].
 
 ---
 
@@ -342,28 +330,31 @@ sequenceDiagram
     actor User as Người dùng
     participant UI as Client (ReactJS)
     participant GW as API Gateway (Node.js)
-    participant Core as Core Backend (Java)
+    participant RuleEng as Rule Engine (Go)
     participant DB as Relational DB
     
     User->>UI: Thêm/Sửa linh kiện trong cấu hình
     UI->>GW: POST /api/v1/compatibility/check
-    GW->>Core: Forward request
-    Core->>DB: Lấy Specs (JSON) của các linh kiện
-    DB-->>Core: Specs của từng linh kiện
-    Core->>DB: Lấy các Compat_Rule đang Active
-    DB-->>Core: Danh sách Rule (List<Rule>)
-    Core->>Core: Tính toán aggregate (VD: tổng TDP, đếm số RAM)
-    loop Đánh giá từng Rule (theo priority)
-        Core->>Core: Trích xuất source_spec & target_spec
-        Core->>Core: So sánh theo operator (IN, LTE, EQUALS...)
+    GW->>RuleEng: Forward request (REST API)
+    RuleEng->>DB: Lấy Specs (JSON) của các linh kiện
+    DB-->>RuleEng: Specs của từng linh kiện
+    RuleEng->>DB: Lấy các Compat_Rule đang Active
+    DB-->>RuleEng: Danh sách Rule
+    RuleEng->>RuleEng: Tính toán aggregate (VD: tổng TDP, đếm số RAM)
+    par Đánh giá song song bằng Goroutines
+        RuleEng->>RuleEng: Goroutine 1: Evaluate CPU-Mainboard rules
+        RuleEng->>RuleEng: Goroutine 2: Evaluate RAM rules
+        RuleEng->>RuleEng: Goroutine 3: Evaluate GPU-Case rules
+        RuleEng->>RuleEng: Goroutine N: Evaluate PSU rules
     end
+    RuleEng->>RuleEng: Tổng hợp violations theo severity
     
     alt Có violation mức ERROR
-        Core-->>GW: Response JSON: is_compatible=false, Errors, Warnings, Info
+        RuleEng-->>GW: Response JSON: is_compatible=false, Errors, Warnings, Info
         GW-->>UI: Forward response
         UI-->>User: Hiển thị cảnh báo ❌ + gợi ý thay thế
     else Chỉ có WARNING/INFO hoặc tương thích hoàn toàn
-        Core-->>GW: Response JSON: is_compatible=true, Warnings, Info
+        RuleEng-->>GW: Response JSON: is_compatible=true, Warnings, Info
         GW-->>UI: Forward response
         UI-->>User: Hiển thị ✅ tương thích (kèm cảnh báo nếu có)
     end
@@ -371,22 +362,23 @@ sequenceDiagram
 
 **Luồng xử lý (Data Flow): Luồng Kiểm tra tính tương thích phần cứng (Compatibility Check)**
 1.  **Input:** Người dùng thêm linh kiện vào giỏ hàng hoặc vào PC Profile Builder (VD: chọn CPU Intel i7-13700K khi đã có Mainboard ASUS ROG X670E socket AM5).
-2.  **Fetch Specs:** Core Backend (Java) truy vấn bảng `Product` để lấy thông số kỹ thuật (JSON specs) của tất cả linh kiện hiện có trong cấu hình.
-3.  **Load Rules:** Rule Engine tải toàn bộ quy tắc `is_active = TRUE` từ bảng `Compat_Rule`, lọc theo các cặp `source_category` ↔ `target_category` có mặt trong cấu hình.
-4.  **Evaluate:** Với mỗi quy tắc, engine trích xuất giá trị `source_spec_key` và `target_spec_key` từ specs của linh kiện tương ứng, sau đó thực hiện phép so sánh theo `operator`:
+2.  **Fetch Specs:** Rule Engine (Go) nhận request từ API Gateway, truy vấn bảng `Product` để lấy thông số kỹ thuật (JSON specs) của tất cả linh kiện hiện có trong cấu hình.
+3.  **Load Rules:** Rule Engine tải toàn bộ quy tắc `is_active = TRUE` từ bảng `Compat_Rule` (có cache in-memory để tối ưu), lọc theo các cặp `source_category` ↔ `target_category` có mặt trong cấu hình.
+4.  **Evaluate (Song song bằng Goroutines):** Các rule được nhóm theo cặp category và đánh giá song song bằng goroutines. Với mỗi quy tắc, engine trích xuất giá trị `source_spec_key` và `target_spec_key` từ specs của linh kiện tương ứng, sau đó thực hiện phép so sánh theo `operator`:
     *   `EQUALS`: source_value == target_value
     *   `IN`: source_value nằm trong danh sách target_value
     *   `LTE` / `GTE`: source_value <= / >= target_value (dùng cho số)
     *   Với các aggregate key (bắt đầu bằng `_`): tính toán từ tập linh kiện (VD: đếm số thanh RAM, tổng dung lượng RAM, tổng TDP).
-5.  **Output:** Trả về danh sách vi phạm (violations) kèm severity. Nếu có bất kỳ violation nào ở mức `ERROR`, hệ thống hiển thị cảnh báo và có thể chặn thêm vào giỏ hàng.
+5.  **Output:** Tổng hợp kết quả từ tất cả goroutines, trả về danh sách vi phạm (violations) kèm severity. Nếu có bất kỳ violation nào ở mức `ERROR`, hệ thống hiển thị cảnh báo và có thể chặn thêm vào giỏ hàng.
 
-**Đặc tả RESTful API cho module kiểm tra tương thích (Module Specification):**
-*   **Endpoint:** `POST /api/v1/compatibility/check` (Thuộc Core Backend - Java Spring Boot)
-*   **Tên hàm nội bộ:** `checkCompatibility()`
+**Đặc tả API cho module kiểm tra tương thích (Module Specification):**
+*   **REST Endpoint:** `POST /api/v1/compatibility/check` (Thuộc Rule Engine - Go)
+*   **gRPC Endpoint:** `rpc CheckCompatibility(CheckRequest) returns (CheckResponse)` (Giao tiếp nội bộ từ Java Core, VD: khi người dùng đặt hàng, Java Core gọi Go Rule Engine qua gRPC để kiểm tra lần cuối trước khi xác nhận đơn)
+*   **Tên hàm nội bộ (Go):** `CheckCompatibility()`
 *   **Mô tả:** Nhận danh sách ID sản phẩm, đánh giá tính tương thích dựa trên các quy tắc trong bảng `Compat_Rule`, trả về kết quả chi tiết.
 *   **Đầu vào (Request Body JSON):**
     `{ "product_ids": ["uuid-cpu", "uuid-mainboard", "uuid-ram-1", "uuid-ram-2", "uuid-gpu", "uuid-psu", "uuid-case"] }`
-*   **Xử lý:** Nhận request → Fetch `Product` specs cho từng ID → Load `Compat_Rule` (active) → Tính aggregate values → Evaluate từng rule → Tập hợp violations theo severity.
+*   **Xử lý:** Nhận request → Fetch `Product` specs cho từng ID → Load `Compat_Rule` (active, có cache) → Tính aggregate values → Đánh giá song song các rule bằng goroutines → Tổng hợp violations theo severity.
 *   **Kết quả trả về (Response JSON):**
 ```json
 {
@@ -428,7 +420,6 @@ flowchart TD
     Profile[PC Profile\n(Cấu hình của tôi)]
     Account[Tài khoản\n(Account / Order History)]
     Detail[Chi tiết SP\n(Product Detail)]
-    Compare[So sánh SP\n(AI Compare)]
     Cart[Giỏ hàng\n(Cart)]
     CompatResult[Kết quả Tương thích\n(Compat Result)]
     UpgradeSuggest[Đề xuất Nâng cấp\n(Upgrade Suggest)]
@@ -446,9 +437,7 @@ flowchart TD
     Category --> Detail
     Builder --> Detail
 
-    Detail --> Compare
     Detail --> Cart
-    Compare --> Cart
     Builder --> CompatResult
     Profile --> UpgradeSuggest
     UpgradeSuggest --> Detail
@@ -477,12 +466,11 @@ flowchart TD
 | :--- | :--- | :--- |
 | 1 | Đăng nhập → Trang chủ → Tìm kiếm → Chi tiết SP → Giỏ hàng → Thanh toán → Xác nhận | Luồng mua hàng cơ bản |
 | 2 | Trang chủ → Danh mục → Chi tiết SP | Duyệt sản phẩm theo danh mục |
-| 3 | Chi tiết SP → So sánh SP → Giỏ hàng | Chọn 2 sản phẩm để AI so sánh, sau đó mua SP được đề xuất |
-| 4 | Trang chủ → PC Builder → Chọn linh kiện → Kết quả Tương thích | Xây dựng cấu hình và kiểm tra tương thích real-time |
-| 5 | PC Builder → Chi tiết SP → Giỏ hàng | Từ builder, xem chi tiết rồi thêm cả bộ vào giỏ |
-| 6 | Trang chủ → PC Profile → Đề xuất Nâng cấp → Chi tiết SP → Giỏ hàng | Xem cấu hình, nhận gợi ý nâng cấp, xem chi tiết và mua |
-| 7 | Trang chủ → Tài khoản | Xem lịch sử đơn hàng, chỉnh sửa thông tin cá nhân |
-| 8 | Đăng nhập (Admin) → Dashboard → Quản lý SP / Đơn hàng / Luật / Người dùng | Luồng quản trị hệ thống |
+| 3 | Trang chủ → PC Builder → Chọn linh kiện → Kết quả Tương thích | Xây dựng cấu hình và kiểm tra tương thích real-time |
+| 4 | PC Builder → Chi tiết SP → Giỏ hàng | Từ builder, xem chi tiết rồi thêm cả bộ vào giỏ |
+| 5 | Trang chủ → PC Profile → Đề xuất Nâng cấp → Chi tiết SP → Giỏ hàng | Xem cấu hình, nhận gợi ý nâng cấp, xem chi tiết và mua |
+| 6 | Trang chủ → Tài khoản | Xem lịch sử đơn hàng, chỉnh sửa thông tin cá nhân |
+| 7 | Đăng nhập (Admin) → Dashboard → Quản lý SP / Đơn hàng / Luật / Người dùng | Luồng quản trị hệ thống |
 
 ### 5.2. Bản vẽ giao diện (Layout / Mockup)
 
@@ -588,16 +576,14 @@ flowchart TD
 │  │ [Ảnh]  RTX 4060 8GB GDDR6                    7.990.000đ │   │
 │  │        ⭐⭐⭐⭐⭐ (234)  │ VRAM: 8GB │ TDP: 115W          │   │
 │  │        🤖 "Phù hợp 95% nhu cầu của bạn"                 │   │
-│  │        [So sánh ☐]  [Thêm vào 🛒]  [Xem chi tiết →]    │   │
+│  │        [Thêm vào 🛒]  [Xem chi tiết →]              │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │ [Ảnh]  RX 7600 8GB GDDR6                     6.490.000đ │   │
 │  │        ⭐⭐⭐⭐ (187)   │ VRAM: 8GB │ TDP: 165W           │   │
 │  │        🤖 "Giá tốt hơn, hiệu năng gaming tương đương"    │   │
-│  │        [So sánh ☐]  [Thêm vào 🛒]  [Xem chi tiết →]    │   │
+│  │        [Thêm vào 🛒]  [Xem chi tiết →]              │   │
 │  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  [So sánh 2 SP đã chọn]                                        │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -667,7 +653,6 @@ flowchart TD
 │  │  [1] [2] [3] [4] │  │                                      │ │
 │  │                  │  │  [Thêm vào giỏ hàng 🛒]             │ │
 │  │                  │  │  [Thêm vào PC Builder 🔧]            │ │
-│  │                  │  │  [So sánh với SP khác ⚖️]            │ │
 │  └──────────────────┘  └──────────────────────────────────────┘ │
 │                                                                  │
 │  ── Thông số kỹ thuật ─────────────────────────────────────────  │
@@ -734,49 +719,8 @@ flowchart TD
 │  [Thêm tất cả vào giỏ hàng 🛒]    [Lưu cấu hình 💾]          │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
-```
 
-#### Màn hình 5: So sánh sản phẩm bằng AI (AI Compare)
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  [Logo]          [Tìm kiếm AI _______________🔍]    [🛒] [👤]  │
-│  Trang chủ > So sánh sản phẩm                                   │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Nhu cầu của bạn: [Chơi game và edit video thỉnh thoảng  ✏️]   │
-│                                                                  │
-│  ┌──────────────────────┬───┬──────────────────────┐            │
-│  │   RTX 4060 8GB       │VS │   RX 7600 8GB        │            │
-│  │   [Ảnh]              │   │   [Ảnh]              │            │
-│  │   7.990.000đ         │   │   6.490.000đ         │            │
-│  ├──────────────────────┼───┼──────────────────────┤            │
-│  │ VRAM: 8GB GDDR6      │   │ VRAM: 8GB GDDR6     │            │
-│  │ CUDA: 3072           │   │ Stream: 2048         │            │
-│  │ TDP: 115W        ✅  │   │ TDP: 165W            │            │
-│  │ Clock: 2460 MHz      │   │ Clock: 2655 MHz  ✅  │            │
-│  │ DLSS 3.0         ✅  │   │ FSR 3.0              │            │
-│  │ Encode: NVENC    ✅  │   │ Encode: VCE          │            │
-│  └──────────────────────┴───┴──────────────────────┘            │
-│                                                                  │
-│  ── 🤖 Phân tích của AI ──────────────────────────────────────  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  🏆 Đề xuất: RTX 4060                                    │   │
-│  │                                                           │   │
-│  │  "Với nhu cầu chơi game + edit video, RTX 4060 là lựa    │   │
-│  │  chọn tốt hơn vì: (1) NVENC encoder vượt trội cho xuất  │   │
-│  │  video, (2) CUDA cores hỗ trợ tốt các phần mềm Adobe,   │   │
-│  │  (3) TDP 115W tiết kiệm điện hơn. RX 7600 có lợi thế    │   │
-│  │  về giá rẻ hơn 1.5 triệu và xung nhịp cao hơn, phù     │   │
-│  │  hợp nếu bạn chỉ chơi game thuần túy."                   │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  [Thêm RTX 4060 vào 🛒]        [Thêm RX 7600 vào 🛒]         │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-#### Màn hình 6: Giỏ hàng & Thanh toán (Cart & Checkout)
+#### Màn hình 5: Giỏ hàng & Thanh toán (Cart & Checkout)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -809,7 +753,7 @@ flowchart TD
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-#### Màn hình 6b: Thanh toán (Checkout)
+#### Màn hình 5b: Thanh toán (Checkout)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -848,7 +792,7 @@ flowchart TD
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-#### Màn hình 6c: Xác nhận đơn hàng (Order Confirmation)
+#### Màn hình 5c: Xác nhận đơn hàng (Order Confirmation)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -885,7 +829,7 @@ flowchart TD
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-#### Màn hình 7: PC Profile & Đề xuất nâng cấp (Upgrade Suggestion)
+#### Màn hình 6: PC Profile & Đề xuất nâng cấp (Upgrade Suggestion)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
