@@ -2,6 +2,45 @@
 
 ## 1. Tổng quan dự án
 
+**Sơ đồ Use-Case:**
+
+```mermaid
+flowchart LR
+    User((Người dùng))
+    Admin((Quản trị viên))
+    
+    subgraph System ["Hệ thống TMĐT Linh kiện Thông minh"]
+        UC0(Đăng ký / Đăng nhập)
+        UC1(Tìm kiếm ngữ nghĩa & Chat với AI)
+        UC1a(Duyệt sản phẩm theo danh mục)
+        UC2(Xây dựng PC & Kiểm tra tương thích)
+        UC3(Quản lý PC Profile & Nhận đề xuất nâng cấp)
+        UC4(Yêu cầu AI So sánh sản phẩm)
+        UC5(Quản lý Giỏ hàng & Đặt hàng)
+        UC6(Quản lý Thông tin Sản phẩm)
+        UC7(Quản lý Tập Luật Tương thích)
+        UC8(Quản lý Đơn hàng & Người dùng)
+        UC9(Xem Dashboard & Thống kê)
+    end
+    
+    User --> UC0
+    User --> UC1
+    User --> UC1a
+    User --> UC2
+    User --> UC3
+    User --> UC4
+    User --> UC5
+    
+    Admin --> UC0
+    Admin --> UC6
+    Admin --> UC7
+    Admin --> UC8
+    Admin --> UC9
+    
+    UC5 -.->|"<<include>>"| UC2
+    UC3 -.->|"<<extend>>"| UC2
+```
+
 **Mục tiêu:**
 *   **Mục đích:** Xây dựng một nền tảng thương mại điện tử chuyên biệt phân phối linh kiện điện tử/máy tính. Giải quyết khó khăn lớn nhất của người dùng khi tự lắp ráp (build) hoặc nâng cấp máy tính: sự thiếu hụt kiến thức về tính tương thích phần cứng, khó khăn trong việc tìm đúng mã sản phẩm và không biết bắt đầu nâng cấp từ đâu.
 *   **Phạm vi:** 
@@ -13,6 +52,42 @@
 *   **Tài liệu tham khảo:** Chuẩn tài liệu đặc tả yêu cầu phần mềm IEEE 830, tài liệu API tích hợp LLM (Gemini API / OpenAI API), tài liệu Elasticsearch.
 
 ## 2. Thiết kế kiến trúc phần mềm (High-Level Design)
+
+**Sơ đồ Kiến trúc Hệ thống (System Architecture Diagram):**
+
+```mermaid
+flowchart TD
+    User((Người dùng)) --> Client["Frontend (ReactJS)"]
+    Client -->|"HTTP/HTTPS"| API_Gateway["API Gateway (Node.js)"]
+    
+    API_Gateway --> Cache[("Redis Cache\n(Session, Product Cache)")]
+    
+    subgraph Core_Backend ["Core Backend Subsystem (Java Spring Boot)"]
+        direction TB
+        User_Service["User & Auth"]
+        Order_Cart["Order & Cart"]
+        Rule_Engine["Hardware Rule Engine"]
+        PC_Profile_Manager["PC Profile Manager"]
+    end
+    
+    subgraph AI_Engine ["AI & NLP Engine (Python FastAPI)"]
+        direction TB
+        Semantic_Search["Semantic Search"]
+        AI_Compare["AI Reasoning & Compare"]
+        AI_Chatbot["Interactive AI Chatbot"]
+    end
+    
+    API_Gateway -->|"REST API (E-commerce)"| Core_Backend
+    API_Gateway -->|"REST API (AI/Search)"| AI_Engine
+    Core_Backend <-->|"REST API (Internal)"| AI_Engine
+    Core_Backend <-->|"Async Tasks\n(Embedding Generation)"| MQ["Message Queue\n(RabbitMQ)"]
+    AI_Engine <--> MQ
+    
+    Core_Backend <--> RDBMS[("Relational DB\n(MySQL/PostgreSQL)")]
+    AI_Engine --> VectorDB[("Vector DB\n(Elasticsearch/Milvus)")]
+    AI_Engine <-->|"API"| LLM["LLM API\n(Gemini)"]
+    Core_Backend --> ObjectStorage[("Object Storage\n(S3/MinIO)\nẢnh sản phẩm")]
+```
 
 **Mô hình kiến trúc:**
 Dự án sử dụng mô hình **Client-Server** kết hợp với kiến trúc **Microservices** (dựa trên **Service-Oriented Architecture - SOA**). 
@@ -32,7 +107,117 @@ Dự án sử dụng mô hình **Client-Server** kết hợp với kiến trúc 
 
 ## 3. Thiết kế dữ liệu (Database Design)
 
-**Sơ đồ thực thể liên kết (ERD) - Cập nhật AI Context:**
+**Sơ đồ thực thể liên kết (ERD):**
+
+```mermaid
+erDiagram
+    USER ||--o{ ORDER : places
+    USER ||--o{ PC_PROFILE : creates
+    USER ||--o{ CART : has
+    CART ||--o{ CART_ITEM : contains
+    CART_ITEM }o--|| PRODUCT : refers
+    PC_PROFILE ||--o{ PROFILE_COMPONENT : contains
+    PROFILE_COMPONENT }o--|| PRODUCT : refers
+    ORDER ||--o{ ORDER_DETAIL : contains
+    ORDER_DETAIL }o--|| PRODUCT : refers
+    CATEGORY ||--o{ PRODUCT : categorizes
+    COMPAT_RULE }o--|| CATEGORY : "source_category"
+    COMPAT_RULE }o--|| CATEGORY : "target_category"
+    PRODUCT ||--o| PRODUCT_EMBEDDINGS : "has (Vector DB)"
+    
+    USER {
+        uuid user_id PK
+        string name
+        string email
+        string password_hash
+        string phone
+        string address
+        enum role "USER | ADMIN"
+        boolean is_active
+        timestamp created_at
+    }
+    CATEGORY {
+        uuid category_id PK
+        string category_name
+        string description
+        uuid parent_category_id FK "nullable - danh muc cha"
+    }
+    PRODUCT {
+        uuid product_id PK
+        string name
+        string brand
+        text description
+        json specs "Thong so ky thuat dong"
+        string image_url
+        int price
+        int stock_quantity
+        boolean is_active
+        uuid category_id FK
+        timestamp created_at
+    }
+    CART {
+        uuid cart_id PK
+        uuid user_id FK
+        timestamp updated_at
+    }
+    CART_ITEM {
+        uuid cart_item_id PK
+        uuid cart_id FK
+        uuid product_id FK
+        int quantity
+    }
+    ORDER {
+        uuid order_id PK
+        uuid user_id FK
+        string shipping_address
+        string payment_method "COD | TRANSFER | EWALLET"
+        enum status "PENDING | CONFIRMED | SHIPPING | DELIVERED | CANCELLED"
+        int total_amount
+        string note
+        timestamp created_at
+    }
+    ORDER_DETAIL {
+        uuid order_detail_id PK
+        uuid order_id FK
+        uuid product_id FK
+        int quantity
+        int unit_price "Gia tai thoi diem dat hang"
+    }
+    PC_PROFILE {
+        uuid profile_id PK
+        uuid user_id FK
+        string profile_name "VD: PC Gaming cua toi"
+        text description
+        timestamp created_at
+        timestamp updated_at
+    }
+    PROFILE_COMPONENT {
+        uuid component_id PK
+        uuid profile_id FK
+        uuid product_id FK
+        int quantity "VD: 2 thanh RAM"
+    }
+    COMPAT_RULE {
+        uuid rule_id PK
+        string rule_name
+        string source_category FK
+        string target_category FK
+        string source_spec_key
+        string target_spec_key
+        enum operator "EQUALS | IN | NOT_IN | LTE | GTE | RANGE"
+        enum severity "ERROR | WARNING | INFO"
+        text error_message_template
+        boolean is_active
+        int priority "So nho = uu tien cao"
+        timestamp created_at
+    }
+    PRODUCT_EMBEDDINGS {
+        uuid product_id PK
+        vector embedding_vector
+    }
+```
+
+**Mô tả các thực thể AI Context:**
 *   Các bảng cơ bản vẫn giữ nguyên: `User`, `Order`, `Product`, `Category`, `PC_Profile`, `Compat_Rule`[cite: 1].
 *   **Thêm thực thể cho AI:**
     *   `Product_Embeddings`: (1) Product - (1) Product_Embeddings (Chứa vector biểu diễn thông tin sản phẩm để phục vụ Semantic Search)[cite: 1].
@@ -79,6 +264,49 @@ Dự án sử dụng mô hình **Client-Server** kết hợp với kiến trúc 
 
 ## 4. Thiết kế chi tiết (Low-Level Design / Internal Design)
 
+**Sơ đồ tuần tự: Luồng Tìm kiếm ngữ nghĩa & Suy luận với LLM**
+
+```mermaid
+sequenceDiagram
+    actor User as Người dùng
+    participant UI as Client (ReactJS)
+    participant GW as API Gateway (Node.js)
+    participant AI as AI Engine (FastAPI)
+    participant VDB as Vector DB
+    participant LLM as Gemini API
+    participant Core as Core Backend (Java)
+    participant DB as Relational DB
+    
+    User->>UI: Nhập câu hỏi (VD: "Tìm VGA < 8tr...")
+    UI->>GW: POST /api/v1/ai/search
+    GW->>AI: Forward request
+    AI->>LLM: Gửi text, yêu cầu Intent Parsing
+    LLM-->>AI: Trả về JSON conditions (budget, category...)
+    AI->>AI: Vectorize query text (embedding)
+    AI->>VDB: Similarity search với vector + conditions
+    VDB-->>AI: Danh sách Top 3 product_id
+    AI->>Core: GET /internal/products?ids=[id1,id2,id3]
+    Core->>DB: Lấy chi tiết sản phẩm
+    DB-->>Core: Product details (specs, price, name...)
+    Core-->>AI: Trả về chi tiết 3 sản phẩm
+    AI->>LLM: Request Reasoning & Compare (3 SP, User Context)
+    
+    alt LLM phản hồi thành công
+        LLM-->>AI: Phân tích so sánh & Lời khuyên
+        AI-->>GW: Response: D/s SP + Giải thích của AI
+        GW-->>UI: Forward response
+        UI-->>User: Hiển thị giao diện kết quả
+    else LLM timeout / lỗi
+        AI-->>GW: Response: D/s SP (không có AI analysis)
+        GW-->>UI: Forward response (fallback)
+        UI-->>User: Hiển thị kết quả + thông báo "AI tạm thời không khả dụng"
+    else Không tìm thấy sản phẩm
+        AI-->>GW: Response: empty results + gợi ý từ khóa khác
+        GW-->>UI: Forward response
+        UI-->>User: Hiển thị "Không tìm thấy" + gợi ý
+    end
+```
+
 **Luồng xử lý (Data Flow): Luồng Tìm kiếm ngữ nghĩa & Suy luận với LLM**[cite: 1]
 1.  **Input:** Người dùng nhập: *"Cần mua card màn hình dưới 8 triệu chạy mượt Cyberpunk 2077 và thỉnh thoảng edit video"*[cite: 1].
 2.  **Intent Parsing (LLM):** Hệ thống gửi chuỗi này đến LLM (Gemini)[cite: 1]. AI suy luận và trích xuất ra các điều kiện: `{ "budget": <= 8000000, "category": "VGA", "keywords": ["gaming high-end", "video editing"], "brand_preference": "Nvidia (tốt cho edit video)" }`[cite: 1].
@@ -106,6 +334,40 @@ Dự án sử dụng mô hình **Client-Server** kết hợp với kiến trúc 
 ```
 
 ---
+
+**Sơ đồ tuần tự: Luồng Kiểm tra tính tương thích phần cứng (Compatibility Check)**
+
+```mermaid
+sequenceDiagram
+    actor User as Người dùng
+    participant UI as Client (ReactJS)
+    participant GW as API Gateway (Node.js)
+    participant Core as Core Backend (Java)
+    participant DB as Relational DB
+    
+    User->>UI: Thêm/Sửa linh kiện trong cấu hình
+    UI->>GW: POST /api/v1/compatibility/check
+    GW->>Core: Forward request
+    Core->>DB: Lấy Specs (JSON) của các linh kiện
+    DB-->>Core: Specs của từng linh kiện
+    Core->>DB: Lấy các Compat_Rule đang Active
+    DB-->>Core: Danh sách Rule (List<Rule>)
+    Core->>Core: Tính toán aggregate (VD: tổng TDP, đếm số RAM)
+    loop Đánh giá từng Rule (theo priority)
+        Core->>Core: Trích xuất source_spec & target_spec
+        Core->>Core: So sánh theo operator (IN, LTE, EQUALS...)
+    end
+    
+    alt Có violation mức ERROR
+        Core-->>GW: Response JSON: is_compatible=false, Errors, Warnings, Info
+        GW-->>UI: Forward response
+        UI-->>User: Hiển thị cảnh báo ❌ + gợi ý thay thế
+    else Chỉ có WARNING/INFO hoặc tương thích hoàn toàn
+        Core-->>GW: Response JSON: is_compatible=true, Warnings, Info
+        GW-->>UI: Forward response
+        UI-->>User: Hiển thị ✅ tương thích (kèm cảnh báo nếu có)
+    end
+```
 
 **Luồng xử lý (Data Flow): Luồng Kiểm tra tính tương thích phần cứng (Compatibility Check)**
 1.  **Input:** Người dùng thêm linh kiện vào giỏ hàng hoặc vào PC Profile Builder (VD: chọn CPU Intel i7-13700K khi đã có Mainboard ASUS ROG X670E socket AM5).
@@ -156,61 +418,113 @@ Dự án sử dụng mô hình **Client-Server** kết hợp với kiến trúc 
 ### 5.1. Sơ đồ di chuyển màn hình (Screen Navigation Flow)
 
 Luồng thao tác chính của người dùng giữa các màn hình:
+```mermaid
+flowchart TD
+    Login[Đăng nhập / Đăng ký\n(Login / Register)]
+    Home[Trang chủ\n(Home)]
+    Search[Tìm kiếm\n(Search)]
+    Category[Danh mục\n(Category)]
+    Builder[PC Builder\n(Compat Checker)]
+    Profile[PC Profile\n(Cấu hình của tôi)]
+    Account[Tài khoản\n(Account / Order History)]
+    Detail[Chi tiết SP\n(Product Detail)]
+    Compare[So sánh SP\n(AI Compare)]
+    Cart[Giỏ hàng\n(Cart)]
+    CompatResult[Kết quả Tương thích\n(Compat Result)]
+    UpgradeSuggest[Đề xuất Nâng cấp\n(Upgrade Suggest)]
+    Checkout[Thanh toán\n(Checkout)]
+    OrderConfirm[Xác nhận Đơn hàng\n(Order Confirm)]
 
-```
-┌─────────────┐
-│  Trang chủ  │
-│  (Home)     │
-└──────┬──────┘
-       │
-       ├──────────────────┬──────────────────┬──────────────────┐
-       ▼                  ▼                  ▼                  ▼
-┌──────────────┐  ┌──────────────┐   ┌───────────────┐   ┌──────────────┐
-│  Tìm kiếm    │  │  Danh mục    │   │  PC Builder   │   │  PC Profile  │
-│  (Search)    │  │  (Category)  │   │  (Compat      │   │  (Cấu hình   │
-│              │  │              │   │   Checker)    │   │   của tôi)   │
-└──────┬───────┘  └──────┬───────┘   └──────┬────────┘   └──────┬───────┘
-       │                 │                  │                   │
-       ├─────────────────┘                  │                   │
-       ▼                                    │                   │
-┌──────────────────┐                        │                   │
-│  Chi tiết SP     │◄───────────────────────┤                   │
-│  (Product Detail)│                        │                   │
-└──────┬───────────┘                        │                   │
-       │                                    │                   │
-       ├──────────────┐                     │                   │
-       ▼              ▼                     ▼                   ▼
-┌────────────┐ ┌──────────────┐    ┌───────────────┐  ┌───────────────┐
-│  So sánh   │ │  Giỏ hàng    │    │  Kết quả      │  │  Đề xuất      │
-│  SP (AI    │ │  (Cart)      │    │  Tương thích  │  │  Nâng cấp     │
-│  Compare)  │ └──────┬───────┘    │  (Compat      │  │  (Upgrade     │
-└────────────┘        │            │   Result)     │  │   Suggest)    │
-                      ▼            └───────────────┘  └───────────────┘
-               ┌──────────────┐
-               │  Thanh toán  │
-               │  (Checkout)  │
-               └──────┬───────┘
-                      ▼
-               ┌──────────────┐
-               │  Xác nhận    │
-               │  Đơn hàng    │
-               │  (Order      │
-               │   Confirm)   │
-               └──────────────┘
+    Login --> Home
+    Home --> Search
+    Home --> Category
+    Home --> Builder
+    Home --> Profile
+    Home --> Account
+
+    Search --> Detail
+    Category --> Detail
+    Builder --> Detail
+
+    Detail --> Compare
+    Detail --> Cart
+    Compare --> Cart
+    Builder --> CompatResult
+    Profile --> UpgradeSuggest
+    UpgradeSuggest --> Detail
+
+    Cart --> Checkout
+    Checkout --> OrderConfirm
+
+    subgraph Admin_Panel ["Khu vực Quản trị (Admin)"]
+        AdminDashboard[Dashboard\n(Thống kê)]
+        AdminProducts[Quản lý Sản phẩm\n(Products)]
+        AdminOrders[Quản lý Đơn hàng\n(Orders)]
+        AdminRules[Quản lý Luật tương thích\n(Compat Rules)]
+        AdminUsers[Quản lý Người dùng\n(Users)]
+        AdminDashboard --> AdminProducts
+        AdminDashboard --> AdminOrders
+        AdminDashboard --> AdminRules
+        AdminDashboard --> AdminUsers
+    end
+
+    Login -->|Admin| AdminDashboard
 ```
 
 **Mô tả các luồng di chuyển chính:**
 
 | STT | Luồng | Mô tả |
 | :--- | :--- | :--- |
-| 1 | Trang chủ → Tìm kiếm → Chi tiết SP → Giỏ hàng → Thanh toán → Xác nhận | Luồng mua hàng cơ bản |
+| 1 | Đăng nhập → Trang chủ → Tìm kiếm → Chi tiết SP → Giỏ hàng → Thanh toán → Xác nhận | Luồng mua hàng cơ bản |
 | 2 | Trang chủ → Danh mục → Chi tiết SP | Duyệt sản phẩm theo danh mục |
-| 3 | Chi tiết SP → So sánh SP | Chọn 2 sản phẩm để AI so sánh ưu/nhược điểm |
+| 3 | Chi tiết SP → So sánh SP → Giỏ hàng | Chọn 2 sản phẩm để AI so sánh, sau đó mua SP được đề xuất |
 | 4 | Trang chủ → PC Builder → Chọn linh kiện → Kết quả Tương thích | Xây dựng cấu hình và kiểm tra tương thích real-time |
 | 5 | PC Builder → Chi tiết SP → Giỏ hàng | Từ builder, xem chi tiết rồi thêm cả bộ vào giỏ |
-| 6 | Trang chủ → PC Profile → Đề xuất Nâng cấp → Chi tiết SP | Xem cấu hình hiện tại, nhận gợi ý nâng cấp, chuyển sang mua |
+| 6 | Trang chủ → PC Profile → Đề xuất Nâng cấp → Chi tiết SP → Giỏ hàng | Xem cấu hình, nhận gợi ý nâng cấp, xem chi tiết và mua |
+| 7 | Trang chủ → Tài khoản | Xem lịch sử đơn hàng, chỉnh sửa thông tin cá nhân |
+| 8 | Đăng nhập (Admin) → Dashboard → Quản lý SP / Đơn hàng / Luật / Người dùng | Luồng quản trị hệ thống |
 
 ### 5.2. Bản vẽ giao diện (Layout / Mockup)
+
+#### Màn hình 0: Đăng nhập / Đăng ký (Login / Register)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  [Logo]              NỀN TẢNG LINH KIỆN ĐIỆN TỬ THÔNG MINH     │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│              ┌──────────────────────────────────┐                │
+│              │  [Đăng nhập]  |  Đăng ký          │                │
+│              ├──────────────────────────────────┤                │
+│              │                                  │                │
+│              │  📧 Email                        │                │
+│              │  ┌──────────────────────────┐    │                │
+│              │  │ user@example.com         │    │                │
+│              │  └──────────────────────────┘    │                │
+│              │                                  │                │
+│              │  🔒 Mật khẩu                     │                │
+│              │  ┌──────────────────────────┐    │                │
+│              │  │ ••••••••••••             │    │                │
+│              │  └──────────────────────────┘    │                │
+│              │                                  │                │
+│              │  ☐ Ghi nhớ đăng nhập             │                │
+│              │                                  │                │
+│              │  ┌──────────────────────────┐    │                │
+│              │  │     🔓 ĐĂNG NHẬP         │    │                │
+│              │  └──────────────────────────┘    │                │
+│              │                                  │                │
+│              │  ── Hoặc đăng nhập bằng ──────  │                │
+│              │  [Google]    [Facebook]           │                │
+│              │                                  │                │
+│              │  Quên mật khẩu?                  │                │
+│              └──────────────────────────────────┘                │
+│                                                                  │
+├──────────────────────────────────────────────────────────────────┤
+│  Footer: Về chúng tôi | Chính sách | Liên hệ | © 2025          │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+*Khi chọn tab "Đăng ký", form bổ sung thêm: Họ tên, Số điện thoại, Xác nhận mật khẩu.*
 
 #### Màn hình 1: Trang chủ (Home)
 
@@ -285,6 +599,54 @@ Luồng thao tác chính của người dùng giữa các màn hình:
 │                                                                  │
 │  [So sánh 2 SP đã chọn]                                        │
 │                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Trạng thái Loading (khi AI đang xử lý, ~2-5 giây):**
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  [Logo]     [Card đồ họa chơi game tầm 8 triệu 🔍]  [🛒] [👤] │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  🤖 AI đang phân tích yêu cầu của bạn...                        │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  ░░░░░░░░░░░░░░░░░░░░░░░░░░░  (Skeleton loading)         │  │
+│  │  ░░░░░░░░░░░░░░░░░░░░                                    │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ── Kết quả đang tải ─────────────────────────────────────────  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  ░░░░░░  ░░░░░░░░░░░░░░░░░░░░░░░░  (Skeleton card)     │   │
+│  │          ░░░░░░░░░░░░░░░                                 │   │
+│  │          ░░░░░░░░                                        │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  ░░░░░░  ░░░░░░░░░░░░░░░░░░░░░░░░  (Skeleton card)     │   │
+│  │          ░░░░░░░░░░░░░░░                                 │   │
+│  │          ░░░░░░░░                                        │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Trạng thái Lỗi (khi AI không khả dụng):**
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  [Logo]     [Card đồ họa chơi game tầm 8 triệu 🔍]  [🛒] [👤] │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  ⚠️ AI tạm thời không khả dụng. Hiển thị kết quả tìm     │  │
+│  │  kiếm thông thường (theo từ khóa).  [Thử lại 🔄]         │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  Bộ lọc: [Hãng ▼] [Giá ▼] [VRAM ▼] [Còn hàng ☑]              │
+│                                                                  │
+│  ── Kết quả (8 sản phẩm) ─── Sắp xếp: [Giá thấp → cao ▼] ──  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ [Ảnh]  RTX 4060 8GB GDDR6                    7.990.000đ │   │
+│  │        ⭐⭐⭐⭐⭐ (234)  │ VRAM: 8GB │ TDP: 115W          │   │
+│  │        [So sánh ☐]  [Thêm vào 🛒]  [Xem chi tiết →]    │   │
+│  └──────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -447,6 +809,82 @@ Luồng thao tác chính của người dùng giữa các màn hình:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+#### Màn hình 6b: Thanh toán (Checkout)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  [Logo]          [Tìm kiếm AI _______________🔍]    [🛒3] [👤] │
+│  Trang chủ > Giỏ hàng > Thanh toán                              │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ── 📦 Thông tin giao hàng ───────────────────────────────────  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Họ tên:    [Nguyễn Văn A_________________________]     │   │
+│  │  SĐT:      [0912345678___________________________]     │   │
+│  │  Địa chỉ:  [123 Đường ABC, Quận 1, TP.HCM_______]     │   │
+│  │  Ghi chú:  [Giao giờ hành chính_________________]      │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ── 💳 Phương thức thanh toán ────────────────────────────────  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  ● Thanh toán khi nhận hàng (COD)                       │   │
+│  │  ○ Chuyển khoản ngân hàng                               │   │
+│  │  ○ Ví điện tử (MoMo / ZaloPay / VNPay)                 │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ── 🧾 Tóm tắt đơn hàng ─────────────────────────────────────  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  RTX 4060 8GB            x1          7.990.000đ         │   │
+│  │  Intel i7-13700K         x1          7.990.000đ         │   │
+│  │  Corsair DDR5 16GB       x2          2.980.000đ         │   │
+│  │  ──────────────────────────────────────────────          │   │
+│  │  Tạm tính:                          18.960.000đ         │   │
+│  │  Phí vận chuyển:                        30.000đ         │   │
+│  │  Tổng cộng:                         18.990.000đ         │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  [← Quay lại giỏ hàng]            [Đặt hàng ✅]               │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+#### Màn hình 6c: Xác nhận đơn hàng (Order Confirmation)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  [Logo]          [Tìm kiếm AI _______________🔍]    [🛒] [👤]  │
+│  Trang chủ > Xác nhận đơn hàng                                  │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│              ┌──────────────────────────────────┐                │
+│              │                                  │                │
+│              │         ✅ ĐẶT HÀNG THÀNH CÔNG   │                │
+│              │                                  │                │
+│              │  Mã đơn hàng: #ORD-20250919-001  │                │
+│              │  Ngày đặt: 19/09/2025            │                │
+│              │  Tổng: 18.990.000đ               │                │
+│              │  Thanh toán: COD                  │                │
+│              │  Trạng thái: ⏳ Đang xử lý       │                │
+│              │                                  │                │
+│              │  Dự kiến giao: 21-23/09/2025     │                │
+│              │                                  │                │
+│              └──────────────────────────────────┘                │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  📋 Chi tiết đơn hàng:                                   │   │
+│  │  RTX 4060 8GB            x1          7.990.000đ          │   │
+│  │  Intel i7-13700K         x1          7.990.000đ          │   │
+│  │  Corsair DDR5 16GB       x2          2.980.000đ          │   │
+│  │                                                           │   │
+│  │  📦 Giao đến: 123 Đường ABC, Quận 1, TP.HCM             │   │
+│  │  📞 SĐT: 0912345678                                      │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  [Tiếp tục mua sắm 🏠]        [Xem đơn hàng của tôi 📦]      │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
 #### Màn hình 7: PC Profile & Đề xuất nâng cấp (Upgrade Suggestion)
 
 ```
@@ -490,3 +928,5 @@ Luồng thao tác chính của người dùng giữa các màn hình:
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+> *Ghi chú: Thanh hiệu năng (%) trong PC Profile được tính dựa trên **xếp hạng phân khúc (tier ranking)** của linh kiện trong danh mục cùng loại trên hệ thống. Ví dụ: CPU i5-12400F đạt 62% nghĩa là nó đứng ở mức 62% trong bảng xếp hạng tất cả CPU đang bán, dựa trên thông số benchmark tham chiếu (Cinebench, PassMark...) được lưu trong trường `specs.benchmark_score` của bảng Product. Thanh này giúp người dùng nhanh chóng nhận biết linh kiện nào đang là "điểm yếu" nhất trong cấu hình để ưu tiên nâng cấp.*
