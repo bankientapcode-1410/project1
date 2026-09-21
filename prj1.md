@@ -263,7 +263,7 @@ flowchart TD
 1. Người dùng truy cập Giỏ hàng, kiểm tra lại danh sách linh kiện và tổng tiền.
 2. Người dùng nhấn "Tiến hành Thanh toán".
 3. *(Include UC0)* Nếu chưa đăng nhập, hệ thống điều hướng sang trang Đăng nhập. Sau khi đăng nhập thành công, quay lại trang Thanh toán.
-4. Người dùng điền/chọn địa chỉ giao hàng và phương thức thanh toán (COD / Chuyển khoản).
+4. Người dùng điền/chọn địa chỉ giao hàng và phương thức thanh toán (COD / Chuyển khoản / Ví điện tử).
 5. Hệ thống tự động gọi hàm `CheckCompatibility()` lần cuối ngầm bên dưới (để đảm bảo không có linh kiện xung đột nào bị sót).
 6. Kết quả trả về an toàn, Người dùng nhấn "Xác nhận đặt hàng".
 7. Hệ thống trừ tồn kho (Stock quantity), tạo bản ghi Order mới với trạng thái PENDING.
@@ -617,12 +617,12 @@ sequenceDiagram
     LLM-->>AI: Trả về JSON conditions (budget, category...)
     AI->>AI: Vectorize query text (embedding)
     AI->>VDB: Similarity search với vector + conditions
-    VDB-->>AI: Danh sách Top 3 product_id
-    AI->>Core: GET /internal/products?ids=[id1,id2,id3]
+    VDB-->>AI: Danh sách Top 5 product_id
+    AI->>Core: GET /internal/products?ids=[id1,id2,id3,id4,id5]
     Core->>DB: Lấy chi tiết sản phẩm
     DB-->>Core: Product details (specs, price, name...)
-    Core-->>AI: Trả về chi tiết 3 sản phẩm
-    AI->>LLM: Request Reasoning (3 SP, User Context)
+    Core-->>AI: Trả về chi tiết 5 sản phẩm
+    AI->>LLM: Request Reasoning (5 SP, User Context)
     
     alt LLM phản hồi thành công
         LLM-->>AI: Phân tích sự phù hợp & Lời khuyên
@@ -643,8 +643,8 @@ sequenceDiagram
 **Luồng xử lý (Data Flow): Luồng Tìm kiếm ngữ nghĩa & Suy luận với LLM**[cite: 1]
 1.  **Input:** Người dùng nhập: *"Cần mua card màn hình dưới 8 triệu chạy mượt Cyberpunk 2077 và thỉnh thoảng edit video"*[cite: 1].
 2.  **Intent Parsing (LLM):** Hệ thống gửi chuỗi này đến LLM (Gemini)[cite: 1]. AI suy luận và trích xuất ra các điều kiện: `{ "budget": <= 8000000, "category": "VGA", "keywords": ["gaming high-end", "video editing"], "brand_preference": "Nvidia (tốt cho edit video)" }`[cite: 1].
-3.  **Database Query:** Hệ thống dùng JSON trên để query vào database hoặc Vector DB, lấy ra top 3 sản phẩm phù hợp nhất (VD: RTX 4060, RX 7600)[cite: 1].
-4.  **AI Reasoning & Generation:** Gửi danh sách 3 sản phẩm này ngược lại cho LLM yêu cầu giải thích sự phù hợp dựa trên ngữ cảnh người dùng[cite: 1].
+3.  **Database Query:** Hệ thống dùng JSON trên để query vào database hoặc Vector DB, lấy ra top 5 sản phẩm phù hợp nhất (VD: RTX 4060, RX 7600)[cite: 1].
+4.  **AI Reasoning & Generation:** Gửi danh sách 5 sản phẩm này ngược lại cho LLM yêu cầu giải thích sự phù hợp dựa trên ngữ cảnh người dùng[cite: 1].
 5.  **Output:** Trả về kết quả hiển thị cho Frontend gồm: Danh sách sản phẩm + Đoạn giải thích suy luận của AI (VD: *"RTX 4060 được đề xuất vì hỗ trợ CUDA tốt cho việc edit video của bạn..."*)[cite: 1].
 
 ---
@@ -757,9 +757,16 @@ sequenceDiagram
     RuleEng-->>Core: Response (is_compatible, errors)
     
     alt Có lỗi xung đột (ERROR)
-        Core-->>GW: 400 Bad Request (Kèm chi tiết lỗi tương thích)
+        Core-->>GW: 409 Conflict (Kèm chi tiết lỗi tương thích)
         GW-->>UI: Forward response
-        UI-->>User: Cảnh báo chặn thanh toán, yêu cầu sửa giỏ hàng
+        UI-->>User: Popup cảnh báo: "Phát hiện linh kiện không tương thích. Bạn có chắc muốn mua lẻ?"
+        alt User xác nhận "Mua lẻ"
+            User->>UI: Xác nhận mua lẻ
+            UI->>GW: POST /api/v1/orders/checkout (force=true)
+            GW->>Core: Forward request (force_bypass=true)
+        else User hủy
+            UI-->>User: Quay lại giỏ hàng để sửa
+        end
     else Tương thích hoàn toàn / User đã xác nhận rủi ro
         Core->>DB: Bắt đầu Transaction
         Core->>DB: Kiểm tra tồn kho (Stock_quantity)
@@ -817,7 +824,7 @@ sequenceDiagram
     
     %% AI nhờ Rule Engine validate các ứng viên
     loop Từng GPU tiềm năng
-        AI->>RuleEng: CheckCompatibility(Cấu hình_Cũ - GPU_Cũ + GPU_Mới)
+        AI->>RuleEng: REST POST /api/v1/compatibility/check (Cấu hình_Cũ - GPU_Cũ + GPU_Mới)
         RuleEng-->>AI: Trả kết quả (VD: GPU_1 bị lỗi do PSU quá yếu, GPU_2 OK)
     end
     
