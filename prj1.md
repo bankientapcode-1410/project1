@@ -263,7 +263,7 @@ flowchart TD
 1. Người dùng truy cập Giỏ hàng, kiểm tra lại danh sách linh kiện và tổng tiền.
 2. Người dùng nhấn "Tiến hành Thanh toán".
 3. *(Include UC0)* Nếu chưa đăng nhập, hệ thống điều hướng sang trang Đăng nhập. Sau khi đăng nhập thành công, quay lại trang Thanh toán.
-4. Người dùng điền/chọn địa chỉ giao hàng và phương thức thanh toán (COD / Chuyển khoản).
+4. Người dùng điền/chọn địa chỉ giao hàng và phương thức thanh toán (COD / Chuyển khoản / Ví điện tử).
 5. Hệ thống tự động gọi hàm `CheckCompatibility()` lần cuối ngầm bên dưới (để đảm bảo không có linh kiện xung đột nào bị sót).
 6. Kết quả trả về an toàn, Người dùng nhấn "Xác nhận đặt hàng".
 7. Hệ thống trừ tồn kho (Stock quantity), tạo bản ghi Order mới với trạng thái PENDING.
@@ -617,12 +617,12 @@ sequenceDiagram
     LLM-->>AI: Trả về JSON conditions (budget, category...)
     AI->>AI: Vectorize query text (embedding)
     AI->>VDB: Similarity search với vector + conditions
-    VDB-->>AI: Danh sách Top 3 product_id
-    AI->>Core: GET /internal/products?ids=[id1,id2,id3]
+    VDB-->>AI: Danh sách Top 5 product_id
+    AI->>Core: GET /internal/products?ids=[id1,id2,id3,id4,id5]
     Core->>DB: Lấy chi tiết sản phẩm
     DB-->>Core: Product details (specs, price, name...)
-    Core-->>AI: Trả về chi tiết 3 sản phẩm
-    AI->>LLM: Request Reasoning (3 SP, User Context)
+    Core-->>AI: Trả về chi tiết 5 sản phẩm
+    AI->>LLM: Request Reasoning (5 SP, User Context)
     
     alt LLM phản hồi thành công
         LLM-->>AI: Phân tích sự phù hợp & Lời khuyên
@@ -643,8 +643,8 @@ sequenceDiagram
 **Luồng xử lý (Data Flow): Luồng Tìm kiếm ngữ nghĩa & Suy luận với LLM**[cite: 1]
 1.  **Input:** Người dùng nhập: *"Cần mua card màn hình dưới 8 triệu chạy mượt Cyberpunk 2077 và thỉnh thoảng edit video"*[cite: 1].
 2.  **Intent Parsing (LLM):** Hệ thống gửi chuỗi này đến LLM (Gemini)[cite: 1]. AI suy luận và trích xuất ra các điều kiện: `{ "budget": <= 8000000, "category": "VGA", "keywords": ["gaming high-end", "video editing"], "brand_preference": "Nvidia (tốt cho edit video)" }`[cite: 1].
-3.  **Database Query:** Hệ thống dùng JSON trên để query vào database hoặc Vector DB, lấy ra top 3 sản phẩm phù hợp nhất (VD: RTX 4060, RX 7600)[cite: 1].
-4.  **AI Reasoning & Generation:** Gửi danh sách 3 sản phẩm này ngược lại cho LLM yêu cầu giải thích sự phù hợp dựa trên ngữ cảnh người dùng[cite: 1].
+3.  **Database Query:** Hệ thống dùng JSON trên để query vào database hoặc Vector DB, lấy ra top 5 sản phẩm phù hợp nhất (VD: RTX 4060, RX 7600)[cite: 1].
+4.  **AI Reasoning & Generation:** Gửi danh sách 5 sản phẩm này ngược lại cho LLM yêu cầu giải thích sự phù hợp dựa trên ngữ cảnh người dùng[cite: 1].
 5.  **Output:** Trả về kết quả hiển thị cho Frontend gồm: Danh sách sản phẩm + Đoạn giải thích suy luận của AI (VD: *"RTX 4060 được đề xuất vì hỗ trợ CUDA tốt cho việc edit video của bạn..."*)[cite: 1].
 
 ---
@@ -757,9 +757,16 @@ sequenceDiagram
     RuleEng-->>Core: Response (is_compatible, errors)
     
     alt Có lỗi xung đột (ERROR)
-        Core-->>GW: 400 Bad Request (Kèm chi tiết lỗi tương thích)
+        Core-->>GW: 409 Conflict (Kèm chi tiết lỗi tương thích)
         GW-->>UI: Forward response
-        UI-->>User: Cảnh báo chặn thanh toán, yêu cầu sửa giỏ hàng
+        UI-->>User: Popup cảnh báo: "Phát hiện linh kiện không tương thích. Bạn có chắc muốn mua lẻ?"
+        alt User xác nhận "Mua lẻ"
+            User->>UI: Xác nhận mua lẻ
+            UI->>GW: POST /api/v1/orders/checkout (force=true)
+            GW->>Core: Forward request (force_bypass=true)
+        else User hủy
+            UI-->>User: Quay lại giỏ hàng để sửa
+        end
     else Tương thích hoàn toàn / User đã xác nhận rủi ro
         Core->>DB: Bắt đầu Transaction
         Core->>DB: Kiểm tra tồn kho (Stock_quantity)
@@ -817,7 +824,7 @@ sequenceDiagram
     
     %% AI nhờ Rule Engine validate các ứng viên
     loop Từng GPU tiềm năng
-        AI->>RuleEng: CheckCompatibility(Cấu hình_Cũ - GPU_Cũ + GPU_Mới)
+        AI->>RuleEng: REST POST /api/v1/compatibility/check (Cấu hình_Cũ - GPU_Cũ + GPU_Mới)
         RuleEng-->>AI: Trả kết quả (VD: GPU_1 bị lỗi do PSU quá yếu, GPU_2 OK)
     end
     
@@ -990,37 +997,7 @@ flowchart TD
 
 #### Màn hình 2: Tìm kiếm thông minh (AI Search)
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  [Logo]     [Card đồ họa chơi game tầm 8 triệu 🔍]  [🛒] [👤] │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  🤖 AI hiểu: "VGA gaming, budget ≤ 8tr, ưu tiên Nvidia"        │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │ 💡 AI gợi ý: Với nhu cầu chơi game, bạn nên ưu tiên GPU  │  │
-│  │ có VRAM ≥ 8GB. Nvidia RTX 40xx hỗ trợ DLSS 3 tốt cho     │  │
-│  │ gaming. Nếu thỉnh thoảng edit video, CUDA cores sẽ hữu ích│ │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  Bộ lọc: [Hãng ▼] [Giá ▼] [VRAM ▼] [Còn hàng ☑]              │
-│                                                                  │
-│  ── Kết quả (12 sản phẩm) ─── Sắp xếp: [Phù hợp nhất ▼] ──── │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ [Ảnh]  RTX 4060 8GB GDDR6                    7.990.000đ │   │
-│  │        ⭐⭐⭐⭐⭐ (234)  │ VRAM: 8GB │ TDP: 115W          │   │
-│  │        🤖 "Phù hợp 95% nhu cầu của bạn"                 │   │
-│  │        [Thêm vào 🛒]  [Xem chi tiết →]              │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ [Ảnh]  RX 7600 8GB GDDR6                     6.490.000đ │   │
-│  │        ⭐⭐⭐⭐ (187)   │ VRAM: 8GB │ TDP: 165W           │   │
-│  │        🤖 "Giá tốt hơn, hiệu năng gaming tương đương"    │   │
-│  │        [Thêm vào 🛒]  [Xem chi tiết →]              │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
+![alt text](screen2a.png)
 
 **Trạng thái Loading (khi AI đang xử lý, ~2-5 giây):**
 ```
@@ -1049,26 +1026,8 @@ flowchart TD
 ```
 
 **Trạng thái Lỗi (khi AI không khả dụng):**
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  [Logo]     [Card đồ họa chơi game tầm 8 triệu 🔍]  [🛒] [👤] │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  ⚠️ AI tạm thời không khả dụng. Hiển thị kết quả tìm     │  │
-│  │  kiếm thông thường (theo từ khóa).  [Thử lại 🔄]         │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  Bộ lọc: [Hãng ▼] [Giá ▼] [VRAM ▼] [Còn hàng ☑]              │
-│                                                                  │
-│  ── Kết quả (8 sản phẩm) ─── Sắp xếp: [Giá thấp → cao ▼] ──  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ [Ảnh]  RTX 4060 8GB GDDR6                    7.990.000đ │   │
-│  │        ⭐⭐⭐⭐⭐ (234)  │ VRAM: 8GB │ TDP: 115W          │   │
-│  │        [So sánh ☐]  [Thêm vào 🛒]  [Xem chi tiết →]    │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────┘
-```
+
+![alt text](screen2c.png)
 
 #### Màn hình 3: Chi tiết sản phẩm (Product Detail)
 
@@ -1116,153 +1075,19 @@ flowchart TD
 
 #### Màn hình 4: PC Builder & Compatibility Checker
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  [Logo]          [Tìm kiếm AI _______________🔍]    [🛒] [👤]  │
-│  Trang chủ > PC Builder                                         │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  🔧 XÂY DỰNG CẤU HÌNH MÁY TÍNH          Tổng: 25.460.000đ    │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ Linh kiện     │ Sản phẩm đã chọn        │ Giá     │Thao tác│   │
-│  │───────────────┼──────────────────────────┼─────────┼────│   │
-│  │ 🔲 CPU        │ Intel i7-13700K          │7.990.000│ ✏️❌│   │
-│  │ 🔲 Mainboard  │ ⚠️ ASUS ROG X670E (AM5) │5.490.000│ ✏️❌│   │
-│  │ 🔲 RAM        │ Corsair 16GB DDR5 x2     │2.980.000│ ✏️❌│   │
-│  │ 🔲 GPU        │ RTX 4060 8GB             │7.990.000│ ✏️❌│   │
-│  │ 🔲 SSD        │ Samsung 990 Pro 1TB      │3.290.000│ ✏️❌│   │
-│  │ 🔲 PSU        │ [+ Chọn nguồn]           │    —    │    │   │
-│  │ 🔲 Case       │ [+ Chọn vỏ case]         │    —    │    │   │
-│  │ 🔲 Tản nhiệt  │ [+ Chọn tản nhiệt]       │    —    │    │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ── 🔍 Kết quả kiểm tra tương thích ──────────────────────────  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  ❌ LỖI: CPU socket LGA1700 không tương thích với        │   │
-│  │     Mainboard ASUS ROG X670E (socket AM5).               │   │
-│  │     → Gợi ý: [ASUS ROG Z790] [MSI MAG B760M]            │   │
-│  │                                                           │   │
-│  │  ⚠️ CẢNH BÁO: Chưa chọn PSU. Tổng TDP ước tính: 280W.  │   │
-│  │     → Khuyến nghị PSU ≥ 450W.                            │   │
-│  │                                                           │   │
-│  │  ✅ RAM DDR5 tương thích với Mainboard.                   │   │
-│  │  ✅ SSD M.2 tương thích (còn 1 slot M.2 trống).          │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  [Thêm tất cả vào giỏ hàng 🛒]    [Lưu cấu hình 💾]          │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
+![alt text](screen4.png)
 
 #### Màn hình 5: Giỏ hàng & Thanh toán (Cart & Checkout)
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  [Logo]          [Tìm kiếm AI _______________🔍]    [🛒3] [👤] │
-│  Trang chủ > Giỏ hàng                                           │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ [Ảnh] RTX 4060 8GB           SL: [- 1 +]    7.990.000đ │   │
-│  │ [Ảnh] Intel i7-13700K        SL: [- 1 +]    7.990.000đ │   │
-│  │ [Ảnh] Corsair DDR5 16GB x2   SL: [- 1 +]    2.980.000đ │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ── ⚠️ Kiểm tra tương thích giỏ hàng ─────────────────────────  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  ⚠️ Giỏ hàng chưa có Mainboard. Không thể kiểm tra      │   │
-│  │     tương thích socket CPU và RAM.                        │   │
-│  │     [Gợi ý mainboard phù hợp →]                         │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ┌────────────────────────────────┐                             │
-│  │  Tạm tính:        18.960.000đ │                             │
-│  │  Phí vận chuyển:      30.000đ │                             │
-│  │  ─────────────────────────── │                             │
-│  │  Tổng cộng:       18.990.000đ │                             │
-│  │                                │                             │
-│  │  [Tiến hành thanh toán →]     │                             │
-│  └────────────────────────────────┘                             │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
+![alt text](screen5a.png)
 
-#### Màn hình 5b: Thanh toán (Checkout)
+**Trạng thái thanh toán (Checkout)**
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  [Logo]          [Tìm kiếm AI _______________🔍]    [🛒3] [👤] │
-│  Trang chủ > Giỏ hàng > Thanh toán                              │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ── 📦 Thông tin giao hàng ───────────────────────────────────  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Họ tên:    [Nguyễn Văn A_________________________]     │   │
-│  │  SĐT:      [0912345678___________________________]     │   │
-│  │  Địa chỉ:  [123 Đường ABC, Quận 1, TP.HCM_______]     │   │
-│  │  Ghi chú:  [Giao giờ hành chính_________________]      │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ── 💳 Phương thức thanh toán ────────────────────────────────  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  ● Thanh toán khi nhận hàng (COD)                       │   │
-│  │  ○ Chuyển khoản ngân hàng                               │   │
-│  │  ○ Ví điện tử (MoMo / ZaloPay / VNPay)                 │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ── 🧾 Tóm tắt đơn hàng ─────────────────────────────────────  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  RTX 4060 8GB            x1          7.990.000đ         │   │
-│  │  Intel i7-13700K         x1          7.990.000đ         │   │
-│  │  Corsair DDR5 16GB       x2          2.980.000đ         │   │
-│  │  ──────────────────────────────────────────────          │   │
-│  │  Tạm tính:                          18.960.000đ         │   │
-│  │  Phí vận chuyển:                        30.000đ         │   │
-│  │  Tổng cộng:                         18.990.000đ         │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  [← Quay lại giỏ hàng]            [Đặt hàng ✅]               │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
+![alt text](screen5b.png)
 
-#### Màn hình 5c: Xác nhận đơn hàng (Order Confirmation)
+**Trạng thái xác nhận đơn hàng (Order Confirmation)**
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  [Logo]          [Tìm kiếm AI _______________🔍]    [🛒] [👤]  │
-│  Trang chủ > Xác nhận đơn hàng                                  │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│              ┌──────────────────────────────────┐                │
-│              │                                  │                │
-│              │         ✅ ĐẶT HÀNG THÀNH CÔNG   │                │
-│              │                                  │                │
-│              │  Mã đơn hàng: #ORD-20250919-001  │                │
-│              │  Ngày đặt: 19/09/2025            │                │
-│              │  Tổng: 18.990.000đ               │                │
-│              │  Thanh toán: COD                  │                │
-│              │  Trạng thái: ⏳ Đang xử lý       │                │
-│              │                                  │                │
-│              │  Dự kiến giao: 21-23/09/2025     │                │
-│              │                                  │                │
-│              └──────────────────────────────────┘                │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  📋 Chi tiết đơn hàng:                                   │   │
-│  │  RTX 4060 8GB            x1          7.990.000đ          │   │
-│  │  Intel i7-13700K         x1          7.990.000đ          │   │
-│  │  Corsair DDR5 16GB       x2          2.980.000đ          │   │
-│  │                                                           │   │
-│  │  📦 Giao đến: 123 Đường ABC, Quận 1, TP.HCM             │   │
-│  │  📞 SĐT: 0912345678                                      │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  [Tiếp tục mua sắm 🏠]        [Xem đơn hàng của tôi 📦]      │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
+![alt text](screen5c.png)
 
 #### Màn hình 6: PC Profile & Đề xuất nâng cấp (Upgrade Suggestion)
 
