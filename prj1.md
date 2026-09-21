@@ -846,19 +846,19 @@ sequenceDiagram
 Luồng thao tác chính của người dùng giữa các màn hình:
 ```mermaid
 flowchart TD
-    Login[Đăng nhập / Đăng ký\n(Login / Register)]
-    Home[Trang chủ\n(Home)]
-    Search[Tìm kiếm\n(Search)]
-    Category[Danh mục\n(Category)]
-    Builder[PC Builder\n(Compat Checker)]
-    Profile[PC Profile\n(Cấu hình của tôi)]
-    Account[Tài khoản\n(Account / Order History)]
-    Detail[Chi tiết SP\n(Product Detail)]
-    Cart[Giỏ hàng\n(Cart)]
-    CompatResult[Kết quả Tương thích\n(Compat Result)]
-    UpgradeSuggest[Đề xuất Nâng cấp\n(Upgrade Suggest)]
-    Checkout[Thanh toán\n(Checkout)]
-    OrderConfirm[Xác nhận Đơn hàng\n(Order Confirm)]
+    Login["Đăng nhập / Đăng ký<br>(Login / Register)"]
+    Home["Trang chủ<br>(Home)"]
+    Search["Tìm kiếm<br>(Search)"]
+    Category["Danh mục<br>(Category)"]
+    Builder["PC Builder<br>(Compat Checker)"]
+    Profile["PC Profile<br>(Cấu hình của tôi)"]
+    Account["Tài khoản<br>(Account / Order History)"]
+    Detail["Chi tiết SP<br>(Product Detail)"]
+    Cart["Giỏ hàng<br>(Cart)"]
+    CompatResult["Kết quả Tương thích<br>(Compat Result)"]
+    UpgradeSuggest["Đề xuất Nâng cấp<br>(Upgrade Suggest)"]
+    Checkout["Thanh toán<br>(Checkout)"]
+    OrderConfirm["Xác nhận Đơn hàng<br>(Order Confirm)"]
 
     Login --> Home
     Home --> Search
@@ -880,11 +880,11 @@ flowchart TD
     Checkout --> OrderConfirm
 
     subgraph Admin_Panel ["Khu vực Quản trị (Admin)"]
-        AdminDashboard[Dashboard\n(Thống kê)]
-        AdminProducts[Quản lý Sản phẩm\n(Products)]
-        AdminOrders[Quản lý Đơn hàng\n(Orders)]
-        AdminRules[Quản lý Luật tương thích\n(Compat Rules)]
-        AdminUsers[Quản lý Người dùng\n(Users)]
+        AdminDashboard["Dashboard<br>(Thống kê)"]
+        AdminProducts["Quản lý Sản phẩm<br>(Products)"]
+        AdminOrders["Quản lý Đơn hàng<br>(Orders)"]
+        AdminRules["Quản lý Luật tương thích<br>(Compat Rules)"]
+        AdminUsers["Quản lý Người dùng<br>(Users)"]
         AdminDashboard --> AdminProducts
         AdminDashboard --> AdminOrders
         AdminDashboard --> AdminRules
